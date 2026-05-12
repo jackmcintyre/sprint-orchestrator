@@ -1,0 +1,18 @@
+{
+  "name": "@sprint-orchestrator/hooks",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/pre-tool-use.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sprint-orchestrator/mcp-server": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.6.0"
+  }
+}
