@@ -33,8 +33,8 @@ On first run in a project, the plugin asks where your planning docs live (or det
 
 ## Modes
 
-- **Interactive** — installed into Claude Code, triggered via the slash command. Watch it run; intervene as needed.
-- **Unattended** — `packages/sdk-runner` runs the same plugin via `@anthropic-ai/claude-agent-sdk` with no UI. Suitable for daemons / scheduled jobs.
+- **One-shot supervised** — install in Claude Code, run the slash command, watch it process up to 5 ready stories, and stop.
+- **Recurring unattended (still inside Claude Code)** — keep a Claude Code session open and run `/loop 30m /sprint-orchestrator:process-backlog`. The orchestrator re-fires every 30 minutes, draining ready stories as they become available. Uses your existing Claude Code auth (Max / Pro / API key) — no separate runner needed.
 
 ## Development
 
