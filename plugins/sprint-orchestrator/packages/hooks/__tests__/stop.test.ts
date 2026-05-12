@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { commitAll, handleStop } from "../src/stop.js";
+import { commitAll, commitMetadataOnly, handleStop } from "../src/stop.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -111,6 +111,52 @@ stories:
     );
     const r = await handleStop({ cwd: root });
     expect(r.action).toBe("failed");
+  });
+});
+
+describe("commitMetadataOnly", () => {
+  it("commits an uncommitted sprint-status.yaml as a chore commit", async () => {
+    const root = await makeRepo();
+    const sprintPath = path.join(root, "sprint-status.yaml");
+    // Seed a tracked sprint-status, commit it.
+    await fs.writeFile(sprintPath, "initial: true\n", "utf8");
+    const { spawnSync } = await import("node:child_process");
+    spawnSync("git", ["add", "-A"], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", "seed sprint"], { cwd: root });
+    // Now modify it — that's the leftover edit we want to capture.
+    await fs.writeFile(sprintPath, "initial: true\nstories: []\n", "utf8");
+    const sha = await commitMetadataOnly(root, sprintPath);
+    expect(sha).toMatch(/^[a-f0-9]{40}$/);
+    const log = spawnSync("git", ["log", "-1", "--pretty=%B"], { cwd: root, encoding: "utf8" });
+    expect(log.stdout).toContain("chore(sprint): persist story metadata");
+    expect(log.stdout).toContain("Co-authored-by: Claude");
+  });
+
+  it("returns null when sprint-status.yaml is clean", async () => {
+    const root = await makeRepo();
+    const sprintPath = path.join(root, "sprint-status.yaml");
+    await fs.writeFile(sprintPath, "initial: true\n", "utf8");
+    const { spawnSync } = await import("node:child_process");
+    spawnSync("git", ["add", "-A"], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", "seed sprint"], { cwd: root });
+    const sha = await commitMetadataOnly(root, sprintPath);
+    expect(sha).toBeNull();
+  });
+
+  it("only commits the sprint-status file, leaving other changes uncommitted", async () => {
+    const root = await makeRepo();
+    const sprintPath = path.join(root, "sprint-status.yaml");
+    await fs.writeFile(sprintPath, "initial: true\n", "utf8");
+    const { spawnSync } = await import("node:child_process");
+    spawnSync("git", ["add", "-A"], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", "seed sprint"], { cwd: root });
+    // Modify both.
+    await fs.writeFile(sprintPath, "initial: true\nstories: []\n", "utf8");
+    await fs.writeFile(path.join(root, "other.txt"), "stays uncommitted", "utf8");
+    await commitMetadataOnly(root, sprintPath);
+    const status = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
+    expect(status.stdout).toMatch(/other\.txt/);
+    expect(status.stdout).not.toMatch(/sprint-status\.yaml/);
   });
 });
 
