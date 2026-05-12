@@ -237,7 +237,7 @@ stories:
         - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
   - id: "3.1"
     title: Add quickstart block to plugin README
-    status: in_progress
+    status: done
     depends_on:
       - "0.2"
     acceptance_criteria:
@@ -257,6 +257,12 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-3
       claimed_at: 2026-05-12T14:09:46.740Z
+      completed_at: 2026-05-12T14:11:25.614Z
+      summary: Added a Quickstart block to the sprint-orchestrator plugin README covering marketplace
+        install, plugin install, the process-backlog slash command, and /loop wrapping.
+      artefacts:
+        - git:929a26185efa3ca0f9871cf75eea2a49209c728e
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/README.md
   - id: "3.2"
     title: Add story lifecycle diagram to README
     status: ready
