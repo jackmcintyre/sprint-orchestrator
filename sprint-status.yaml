@@ -1,0 +1,198 @@
+sprint_id: orchestrator-polish-sprint-1
+stories:
+  - id: "0.1"
+    title: "Rename BmadError to OrchestratorError"
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: plugins/sprint-orchestrator/packages/mcp-server/src/lib/errors.ts
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/lib/errors.ts
+          pattern: "class OrchestratorError"
+        - type: shell
+          cmd: sh -c '! grep -rq "BmadError" plugins/sprint-orchestrator/packages/mcp-server/src/'
+        - type: shell
+          cmd: sh -c '! grep -rq "BMAD_" plugins/sprint-orchestrator/packages/mcp-server/src/'
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator -r typecheck
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator -r build
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator -r test
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator lint
+    orchestrator: {}
+
+  - id: "0.2"
+    title: "Add pnpm verify root script"
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/package.json
+          pattern: "\"verify\""
+        - type: regex
+          cmd: cat .github/workflows/ci.yml
+          pattern: "pnpm verify"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "1.1"
+    title: "Extend state schema with rework tracking fields"
+    status: ready
+    depends_on: ["0.1"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
+          pattern: "rework_count"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
+          pattern: "last_review_feedback"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
+          pattern: "last_review_at"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "1.2"
+    title: "Add markStoryNeedsRework MCP tool"
+    status: ready
+    depends_on: ["1.1"]
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
+          pattern: "export.*function markStoryNeedsRework"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+          pattern: "markStoryNeedsRework"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "1.3"
+    title: "Wire reviewer + dev + skill into the rework loop"
+    status: ready
+    depends_on: ["1.2"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/agents/reviewer.md
+          pattern: "markStoryNeedsRework"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/agents/dev.md
+          pattern: "last_review_feedback"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          pattern: "rework"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "2.1"
+    title: "Add getSprintReport MCP tool"
+    status: ready
+    depends_on: ["0.1", "0.2"]
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
+          pattern: "export.*function getSprintReport"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+          pattern: "getSprintReport"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "2.2"
+    title: "Append story lifecycle events to run.log"
+    status: ready
+    depends_on: ["0.1", "0.2"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/hooks/src/post-tool-use.ts
+          pattern: "story_start"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/hooks/src/post-tool-use.ts
+          pattern: "story_end"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "2.3"
+    title: "Add force_release_stale skill option"
+    status: ready
+    depends_on: ["1.3"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
+          pattern: "force_release_stale"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          pattern: "force_release_stale"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "3.1"
+    title: "Add quickstart block to plugin README"
+    status: ready
+    depends_on: ["0.2"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "/plugin marketplace add"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "/plugin install sprint-orchestrator"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "/loop.*process-backlog"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
+
+  - id: "3.2"
+    title: "Add story lifecycle diagram to README"
+    status: ready
+    depends_on: ["1.3"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "Story lifecycle"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "getReadyStories"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "claimStory"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "validateAcceptanceCriteria"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "commitStoryArtefacts"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "markStoryComplete"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/README.md
+          pattern: "markStoryNeedsRework"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+    orchestrator: {}
