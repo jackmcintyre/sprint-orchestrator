@@ -123,7 +123,7 @@ stories:
         - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
   - id: "1.3"
     title: Wire reviewer + dev + skill into the rework loop
-    status: in_progress
+    status: done
     depends_on:
       - "1.2"
     acceptance_criteria:
@@ -143,9 +143,18 @@ stories:
     orchestrator:
       claimed_by: dev-20260512-5
       claimed_at: 2026-05-12T13:56:58.910Z
+      completed_at: 2026-05-12T13:59:37.517Z
+      summary: Wired the rework loop into reviewer.md, dev.md, and process-backlog SKILL.md so reviewers
+        can send stories back via markStoryNeedsRework and devs read last_review_feedback before
+        retrying.
+      artefacts:
+        - git:b3f3126c051206ab7b0c376cb636b2410cc995d0
+        - plugins/sprint-orchestrator/agents/reviewer.md
+        - plugins/sprint-orchestrator/agents/dev.md
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
   - id: "2.1"
     title: Add getSprintReport MCP tool
-    status: ready
+    status: in_progress
     depends_on:
       - "0.1"
       - "0.2"
@@ -162,7 +171,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-20260512-6
+      claimed_at: 2026-05-12T13:59:59.777Z
   - id: "2.2"
     title: Append story lifecycle events to run.log
     status: ready

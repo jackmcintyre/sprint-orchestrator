@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { defaultContext, type ToolContext } from "./tools/context.js";
 import { getSprintStatus } from "./tools/get-sprint-status.js";
+import { getSprintReport } from "./tools/get-sprint-report.js";
 import { getReadyStories } from "./tools/get-ready-stories.js";
 import { getStoryContext } from "./tools/get-story-context.js";
 import { claimStory } from "./tools/claim-story.js";
@@ -55,6 +56,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: {},
     },
     async () => json(await getSprintStatus(ctx)),
+  );
+
+  server.registerTool(
+    "getSprintReport",
+    {
+      title: "Get sprint report",
+      description:
+        "Read-only sprint summary: per-status counts, a per-story summary array, and a rendered multi-line string suitable for chat display. Does not mutate state.",
+      inputSchema: {},
+    },
+    async () => json(await getSprintReport(ctx)),
   );
 
   server.registerTool(

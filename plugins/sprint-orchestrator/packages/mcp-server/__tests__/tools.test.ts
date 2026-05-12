@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { baseSprint, makeTempProject } from "./fixtures.js";
 
 import { getSprintStatus } from "../src/tools/get-sprint-status.js";
+import { getSprintReport } from "../src/tools/get-sprint-report.js";
 import { getReadyStories } from "../src/tools/get-ready-stories.js";
 import { getStoryContext } from "../src/tools/get-story-context.js";
 import { claimStory } from "../src/tools/claim-story.js";
@@ -48,7 +49,9 @@ describe("getReadyStories", () => {
     const variant = {
       ...baseSprint,
       stories: baseSprint.stories.map((s) =>
-        s.id === "S1" ? { ...s, status: "done", orchestrator: { completed_at: "2026-05-12T08:00:00Z" } } : s,
+        s.id === "S1"
+          ? { ...s, status: "done", orchestrator: { completed_at: "2026-05-12T08:00:00Z" } }
+          : s,
       ),
     };
     const { ctx } = await setup(variant as unknown as typeof baseSprint);
@@ -283,5 +286,91 @@ describe("getStoryContext", () => {
     const { ctx } = await setup();
     const result = await getStoryContext(ctx, "S1");
     expect(result.contextPaths).toEqual({});
+  });
+});
+
+describe("getSprintReport", () => {
+  const fullSpread = {
+    sprint_id: "report-fixture",
+    stories: [
+      {
+        id: "B1",
+        title: "Backlog item",
+        status: "backlog",
+        depends_on: [],
+        acceptance_criteria: { checks: [] },
+        orchestrator: {},
+      },
+      {
+        id: "R1",
+        title: "Ready item",
+        status: "ready",
+        depends_on: [],
+        acceptance_criteria: { checks: [] },
+        orchestrator: {},
+      },
+      {
+        id: "P1",
+        title: "Work in progress",
+        status: "in_progress",
+        depends_on: [],
+        acceptance_criteria: { checks: [] },
+        orchestrator: { claimed_by: "dev-1", claimed_at: "2026-05-12T08:00:00Z" },
+      },
+      {
+        id: "D1",
+        title: "Already done",
+        status: "done",
+        depends_on: [],
+        acceptance_criteria: { checks: [] },
+        orchestrator: { completed_at: "2026-05-12T09:00:00Z", summary: "shipped" },
+      },
+      {
+        id: "X1",
+        title: "Failed story",
+        status: "blocked",
+        depends_on: [],
+        acceptance_criteria: { checks: [] },
+        orchestrator: { last_failure_reason: "dep missing" },
+      },
+    ],
+  };
+
+  it("counts every status and renders every story", async () => {
+    const { ctx } = await setup(fullSpread as unknown as typeof baseSprint);
+    const report = await getSprintReport(ctx);
+
+    expect(report.counts).toEqual({
+      backlog: 1,
+      ready: 1,
+      in_progress: 1,
+      done: 1,
+      blocked: 1,
+    });
+    expect(report.stories.map((s) => s.id).sort()).toEqual(["B1", "D1", "P1", "R1", "X1"]);
+    for (const story of fullSpread.stories) {
+      expect(report.rendered).toContain(story.id);
+      expect(report.rendered).toContain(story.title);
+    }
+    expect(report.rendered).toContain("report-fixture");
+  });
+
+  it("surfaces lastFailure for blocked stories", async () => {
+    const { ctx } = await setup(fullSpread as unknown as typeof baseSprint);
+    const report = await getSprintReport(ctx);
+    const blocked = report.stories.find((s) => s.id === "X1");
+    expect(blocked?.lastFailure).toBe("dep missing");
+    expect(report.rendered).toContain("dep missing");
+  });
+
+  it("includes summary for done stories and omits empty optional fields", async () => {
+    const { ctx } = await setup(fullSpread as unknown as typeof baseSprint);
+    const report = await getSprintReport(ctx);
+    const done = report.stories.find((s) => s.id === "D1");
+    expect(done?.summary).toBe("shipped");
+    expect(done?.lastFailure).toBeUndefined();
+    const ready = report.stories.find((s) => s.id === "R1");
+    expect(ready?.summary).toBeUndefined();
+    expect(ready?.lastFailure).toBeUndefined();
   });
 });
