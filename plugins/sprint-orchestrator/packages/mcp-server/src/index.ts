@@ -9,6 +9,7 @@ import { getStoryContext } from "./tools/get-story-context.js";
 import { claimStory } from "./tools/claim-story.js";
 import { markStoryComplete } from "./tools/mark-story-complete.js";
 import { markStoryFailed } from "./tools/mark-story-failed.js";
+import { markStoryNeedsRework } from "./tools/mark-story-needs-rework.js";
 import { validateAcceptanceCriteria } from "./tools/validate-acceptance-criteria.js";
 import { releaseStaleClaims } from "./tools/release-stale-claims.js";
 import { getOrInitConfig } from "./tools/get-or-init-config.js";
@@ -119,6 +120,23 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       await markStoryFailed(ctx, storyId, reason);
       return json({ ok: true });
     },
+  );
+
+  server.registerTool(
+    "markStoryNeedsRework",
+    {
+      title: "Mark story needs rework",
+      description:
+        "Record a failed-review attempt on a claimed in-progress story. Increments rework_count, stores reviewer feedback, and reports whether the cap has been reached. Does not change status or release the claim — the same dev gets another swing.",
+      inputSchema: {
+        storyId: z.string(),
+        agentId: z.string(),
+        reason: z.string().min(1),
+        reworkLimit: z.number().int().positive().optional(),
+      },
+    },
+    async ({ storyId, agentId, reason, reworkLimit }) =>
+      json(await markStoryNeedsRework(ctx, storyId, agentId, reason, reworkLimit)),
   );
 
   server.registerTool(
