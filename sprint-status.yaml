@@ -154,7 +154,7 @@ stories:
         - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
   - id: "2.1"
     title: Add getSprintReport MCP tool
-    status: in_progress
+    status: done
     depends_on:
       - "0.1"
       - "0.2"
@@ -174,9 +174,17 @@ stories:
     orchestrator:
       claimed_by: dev-20260512-6
       claimed_at: 2026-05-12T13:59:59.777Z
+      completed_at: 2026-05-12T14:03:29.090Z
+      summary: Added read-only getSprintReport MCP tool returning per-status counts, story summaries, and
+        rendered text view; registered in server and covered by tests.
+      artefacts:
+        - git:277db4eff06735255ddba1cdebf3b67e8ae777ed
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
   - id: "2.2"
     title: Append story lifecycle events to run.log
-    status: ready
+    status: in_progress
     depends_on:
       - "0.1"
       - "0.2"
@@ -191,7 +199,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-20260513-1
+      claimed_at: 2026-05-12T14:03:41.405Z
   - id: "2.3"
     title: Add force_release_stale skill option
     status: ready
