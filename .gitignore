@@ -9,3 +9,9 @@ coverage/
 _bmad/
 _bmad-output/
 .claude/skills/bmad-*/
+
+# Claude Code runtime — generated per-session/per-machine, not source
+.claude/scheduled_tasks.lock
+.claude/*.lock
+.claude/settings.local.json
+.claude/*.local.json
