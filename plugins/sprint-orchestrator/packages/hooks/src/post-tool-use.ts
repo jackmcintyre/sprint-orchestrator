@@ -1,7 +1,13 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { readStdinJson } from "./lib/io.js";
+
+// Resolve prettier from the plugin's own node_modules so the hook works in
+// projects that don't depend on prettier themselves.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PRETTIER_BIN = path.resolve(HERE, "..", "node_modules", ".bin", "prettier");
 
 export interface PostToolUseInput {
   cwd?: string;
@@ -39,7 +45,7 @@ export async function handlePostToolUse(input: PostToolUseInput | null): Promise
 
 export async function formatFile(projectRoot: string, target: string): Promise<void> {
   await new Promise<void>((resolve) => {
-    const child = spawn("pnpm", ["prettier", "--write", target], {
+    const child = spawn(PRETTIER_BIN, ["--write", "--no-error-on-unmatched-pattern", target], {
       cwd: projectRoot,
       stdio: "ignore",
     });

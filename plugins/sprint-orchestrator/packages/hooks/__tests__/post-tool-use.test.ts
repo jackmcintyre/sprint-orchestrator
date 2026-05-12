@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { appendRunLog, FORMATTABLE, TEST_CMD_HINT, handlePostToolUse } from "../src/post-tool-use.js";
+import { appendRunLog, FORMATTABLE, TEST_CMD_HINT, formatFile, handlePostToolUse } from "../src/post-tool-use.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -27,6 +27,15 @@ describe("post-tool-use", () => {
     for (const c of ["pnpm test", "pnpm -r test", "npm test", "yarn vitest", "pnpm jest --watch"])
       expect(re.test(c)).toBe(true);
     for (const c of ["pnpm build", "ls", "git log"]) expect(re.test(c)).toBe(false);
+  });
+
+  it("formatFile rewrites a TS file with prettier from the plugin's deps", async () => {
+    const root = await makeRoot();
+    const target = path.join(root, "messy.ts");
+    await fs.writeFile(target, "const   x   =   1;\n", "utf8");
+    await formatFile(root, target);
+    const after = await fs.readFile(target, "utf8");
+    expect(after).toBe("const x = 1;\n");
   });
 
   it("handlePostToolUse on null input is a no-op", async () => {
