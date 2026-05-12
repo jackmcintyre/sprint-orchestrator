@@ -12,6 +12,7 @@ import { markStoryFailed } from "./tools/mark-story-failed.js";
 import { validateAcceptanceCriteria } from "./tools/validate-acceptance-criteria.js";
 import { releaseStaleClaims } from "./tools/release-stale-claims.js";
 import { getOrInitConfig } from "./tools/get-or-init-config.js";
+import { commitStoryArtefacts } from "./tools/commit-story-artefacts.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -128,6 +129,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { storyId: z.string() },
     },
     async ({ storyId }) => json(await validateAcceptanceCriteria(ctx, storyId)),
+  );
+
+  server.registerTool(
+    "commitStoryArtefacts",
+    {
+      title: "Commit story artefacts",
+      description:
+        "Stage and commit the working tree as the result of one story. Message format: feat(<storyId>): <title>, with a Co-authored-by: Claude trailer. Returns { sha } or { sha: null } when there is nothing to commit.",
+      inputSchema: { storyId: z.string() },
+    },
+    async ({ storyId }) => json(await commitStoryArtefacts(ctx, storyId)),
   );
 
   server.registerTool(
