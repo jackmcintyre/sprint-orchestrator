@@ -41,7 +41,7 @@ stories:
         - /Users/jackmcintyre/projects/claude-dev-loop/sprint-status.yaml
   - id: "0.2"
     title: Add pnpm verify root script
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -57,9 +57,16 @@ stories:
     orchestrator:
       claimed_by: dev-20260512-2
       claimed_at: 2026-05-12T13:45:21.113Z
+      completed_at: 2026-05-12T13:47:16.206Z
+      summary: Added pnpm verify script to plugin root package.json and switched CI workflow to invoke
+        pnpm verify.
+      artefacts:
+        - git:18784710b49837404a19ad9a5ddb0158baaf8bc4
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/package.json
+        - /Users/jackmcintyre/projects/claude-dev-loop/.github/workflows/ci.yml
   - id: "1.1"
     title: Extend state schema with rework tracking fields
-    status: ready
+    status: in_progress
     depends_on:
       - "0.1"
     acceptance_criteria:
@@ -76,7 +83,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-20260512-3
+      claimed_at: 2026-05-12T13:47:30.141Z
   - id: "1.2"
     title: Add markStoryNeedsRework MCP tool
     status: ready

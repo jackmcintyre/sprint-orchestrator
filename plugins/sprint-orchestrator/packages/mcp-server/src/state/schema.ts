@@ -36,6 +36,9 @@ export const OrchestratorMeta = z
     completed_at: z.string().datetime({ offset: true }).optional(),
     summary: z.string().optional(),
     last_failure_reason: z.string().optional(),
+    rework_count: z.number().int().nonnegative().default(0),
+    last_review_feedback: z.string().optional(),
+    last_review_at: z.string().datetime({ offset: true }).optional(),
   })
   .passthrough()
   .default({});
