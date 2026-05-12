@@ -2,7 +2,14 @@ import { describe, it, expect, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { appendRunLog, FORMATTABLE, TEST_CMD_HINT, formatFile, handlePostToolUse } from "../src/post-tool-use.js";
+import {
+  appendRunLog,
+  FORMATTABLE,
+  TEST_CMD_HINT,
+  formatFile,
+  handlePostToolUse,
+  mcpToolSuffix,
+} from "../src/post-tool-use.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -18,7 +25,8 @@ async function makeRoot(): Promise<string> {
 describe("post-tool-use", () => {
   it("FORMATTABLE matches typescript/javascript variants", () => {
     const re = FORMATTABLE;
-    for (const p of ["a.ts", "b.tsx", "c.js", "d.jsx", "e.mjs", "f.cjs"]) expect(re.test(p)).toBe(true);
+    for (const p of ["a.ts", "b.tsx", "c.js", "d.jsx", "e.mjs", "f.cjs"])
+      expect(re.test(p)).toBe(true);
     for (const p of ["a.md", "b.json", "c.txt", "d.py"]) expect(re.test(p)).toBe(false);
   });
 
@@ -75,5 +83,84 @@ describe("post-tool-use", () => {
     expect(lines.length).toBe(2);
     expect(JSON.parse(lines[0]!).exit_code).toBe(0);
     expect(JSON.parse(lines[1]!).exit_code).toBe(1);
+  });
+
+  it("mcpToolSuffix extracts the trailing tool name", () => {
+    expect(mcpToolSuffix("mcp__sprint-orchestrator__claimStory")).toBe("claimStory");
+    expect(mcpToolSuffix("mcp__foo__bar__baz")).toBe("baz");
+    expect(mcpToolSuffix("Bash")).toBeNull();
+    expect(mcpToolSuffix(undefined)).toBeNull();
+  });
+
+  it("handlePostToolUse logs story_start when claimStory MCP tool fires", async () => {
+    const root = await makeRoot();
+    await handlePostToolUse({
+      cwd: root,
+      tool_name: "mcp__sprint-orchestrator__claimStory",
+      tool_input: { storyId: "2.2", agentId: "dev-1" },
+      tool_response: { exit_code: 0 },
+    });
+    const log = await fs.readFile(path.join(root, ".sprint-orchestrator", "run.log"), "utf8");
+    const entry = JSON.parse(log.trim().split("\n").pop()!);
+    expect(entry.event).toBe("story_start");
+    expect(entry.story_id).toBe("2.2");
+    expect(entry.tool).toBe("claimStory");
+    expect(entry.agent_id).toBe("dev-1");
+  });
+
+  it("handlePostToolUse logs story_end for markStoryComplete", async () => {
+    const root = await makeRoot();
+    await handlePostToolUse({
+      cwd: root,
+      tool_name: "mcp__sprint-orchestrator__markStoryComplete",
+      tool_input: { storyId: "2.2", summary: "done" },
+    });
+    const log = await fs.readFile(path.join(root, ".sprint-orchestrator", "run.log"), "utf8");
+    const entry = JSON.parse(log.trim().split("\n").pop()!);
+    expect(entry.event).toBe("story_end");
+    expect(entry.story_id).toBe("2.2");
+    expect(entry.outcome).toBe("complete");
+  });
+
+  it("handlePostToolUse logs story_end for markStoryFailed and markStoryNeedsRework", async () => {
+    const root = await makeRoot();
+    await handlePostToolUse({
+      cwd: root,
+      tool_name: "mcp__sprint-orchestrator__markStoryFailed",
+      tool_input: { storyId: "2.2", reason: "blocked" },
+    });
+    await handlePostToolUse({
+      cwd: root,
+      tool_name: "mcp__sprint-orchestrator__markStoryNeedsRework",
+      tool_input: { storyId: "2.2", feedback: "fix tests" },
+    });
+    const log = await fs.readFile(path.join(root, ".sprint-orchestrator", "run.log"), "utf8");
+    const entries = log
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(entries[0].outcome).toBe("failed");
+    expect(entries[1].outcome).toBe("needs_rework");
+    expect(entries.every((e) => e.event === "story_end")).toBe(true);
+  });
+
+  it("handlePostToolUse skips MCP tools without a storyId", async () => {
+    const root = await makeRoot();
+    await handlePostToolUse({
+      cwd: root,
+      tool_name: "mcp__sprint-orchestrator__claimStory",
+      tool_input: {},
+    });
+    await expect(fs.access(path.join(root, ".sprint-orchestrator", "run.log"))).rejects.toThrow();
+  });
+
+  it("handlePostToolUse ignores unrelated MCP tools", async () => {
+    const root = await makeRoot();
+    await handlePostToolUse({
+      cwd: root,
+      tool_name: "mcp__sprint-orchestrator__getReadyStories",
+      tool_input: { storyId: "2.2" },
+    });
+    await expect(fs.access(path.join(root, ".sprint-orchestrator", "run.log"))).rejects.toThrow();
   });
 });

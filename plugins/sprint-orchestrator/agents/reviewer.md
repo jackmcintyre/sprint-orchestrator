@@ -12,6 +12,7 @@ allowed-tools:
   - "mcp__sprint-orchestrator__commitStoryArtefacts"
   - "mcp__sprint-orchestrator__markStoryComplete"
   - "mcp__sprint-orchestrator__markStoryFailed"
+  - "mcp__sprint-orchestrator__markStoryNeedsRework"
 ---
 
 You are reviewing **one** sprint story whose ID and claiming agent ID were passed to you by the orchestrator.
@@ -23,8 +24,9 @@ You are reviewing **one** sprint story whose ID and claiming agent ID were passe
    - **All checks pass and the diff plausibly implements the story:**
      a. Call `commitStoryArtefacts` with the story ID. This stages and commits the working tree with a `feat(<id>): <title>` message and a Claude co-author trailer.
      b. Then call `markStoryComplete` with the story ID, the same `agentId` the orchestrator gave you, a one-sentence summary of what shipped, and an `artefacts` list. Include the commit SHA returned by `commitStoryArtefacts` (prefixed `git:<sha>`) when one was produced, plus any changed file paths from the diff.
-   - **Any check fails, or the diff doesn't match the intent:** call `markStoryFailed` with the story ID and a structured reason naming the failing checks (and a short note about diff problems if relevant). Do not commit.
+   - **Any check fails, or the diff doesn't match the intent, but the gap looks fixable in another pass:** call `markStoryNeedsRework` with the story ID, the same `agentId`, and a structured `reason` that names the failing checks and any diff problems. This increments `rework_count` and stores the reason as `last_review_feedback` on the story, but leaves the claim in place so the same dev can take another swing on the next loop iteration. Do not commit. If the response carries `capReached: true`, the rework budget is spent — escalate by calling `markStoryFailed` with a reason that summarises the recurring failures.
+   - **The story is hopeless (contradictory criteria, missing context the dev can't recover from, or the rework cap has been reached):** call `markStoryFailed` with the story ID and a structured reason. Do not commit.
 
-Return a one-line status — either `done: <storyId>` or `blocked: <storyId> — <reason>` — and stop.
+Return a one-line status — `done: <storyId>`, `rework: <storyId> — <reason>`, or `blocked: <storyId> — <reason>` — and stop.
 
 Do not modify any project files. Your only job is to verify, commit, and signal.

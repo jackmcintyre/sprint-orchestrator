@@ -12,7 +12,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --ext .ts,.tsx",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "verify": "pnpm -r build && pnpm -r typecheck && pnpm lint && pnpm -r test"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

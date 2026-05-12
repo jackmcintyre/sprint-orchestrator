@@ -24,7 +24,4 @@ jobs:
           cache-dependency-path: plugins/sprint-orchestrator/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       # Build first: packages/hooks imports from packages/mcp-server/dist/.
-      - run: pnpm -r build
-      - run: pnpm -r typecheck
-      - run: pnpm lint
-      - run: pnpm -r test
+      - run: pnpm verify

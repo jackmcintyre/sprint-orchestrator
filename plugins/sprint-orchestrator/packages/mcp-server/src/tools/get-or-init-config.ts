@@ -16,6 +16,13 @@ export interface OrchestratorConfig {
   autoDetected: boolean;
   /** Layout name (e.g. "bmad-v6", "custom"). */
   layout: string;
+  /**
+   * If set, the process-backlog skill is permitted to auto-release stale
+   * `in_progress` claims older than this many minutes at the start of a run.
+   * Omit / leave undefined to require the user to call `releaseStaleClaims`
+   * themselves (the safe default).
+   */
+  force_release_stale?: number;
 }
 
 export interface ConfigResult {
@@ -55,10 +62,7 @@ export async function getOrInitConfig(ctx: ToolContext): Promise<ConfigResult> {
 }
 
 /** Persist a user-provided or detected config. */
-export async function writeConfig(
-  configPath: string,
-  config: OrchestratorConfig,
-): Promise<void> {
+export async function writeConfig(configPath: string, config: OrchestratorConfig): Promise<void> {
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(configPath, YAML.stringify(config, { lineWidth: 100 }), "utf8");
 }
@@ -90,7 +94,8 @@ async function detectBmadV6(projectRoot: string): Promise<OrchestratorConfig | n
     autoDetected: true,
     layout: "bmad-v6",
   };
-  if (await pathExists(path.join(projectRoot, candidates.prdPath))) config.prdPath = candidates.prdPath;
+  if (await pathExists(path.join(projectRoot, candidates.prdPath)))
+    config.prdPath = candidates.prdPath;
   if (await pathExists(path.join(projectRoot, candidates.architecturePath)))
     config.architecturePath = candidates.architecturePath;
   if (await pathExists(path.join(projectRoot, candidates.storiesDir)))

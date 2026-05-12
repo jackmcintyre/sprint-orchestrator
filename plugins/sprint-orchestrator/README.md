@@ -8,7 +8,30 @@ Works standalone or with BMAD v6 planning artefacts. When BMAD layout is detecte
 
 **Phase 1 — skeleton.** Scaffolding only. Tools, hooks, and agents are stubs. See `project.md` for the full build spec.
 
-## Install
+## Quickstart
+
+Install the plugin into Claude Code from this repo's marketplace:
+
+```
+/plugin marketplace add jackmcintyre/claude-dev-loop
+/plugin install sprint-orchestrator
+```
+
+Then drive the backlog from inside Claude Code:
+
+```
+/sprint-orchestrator:process-backlog
+```
+
+To keep the orchestrator running on an interval (claiming and routing ready stories without manual nudging), wrap it in `/loop`:
+
+```
+/loop 5m /sprint-orchestrator:process-backlog
+```
+
+On first run in a project, the plugin asks where your planning docs live (or detects BMAD v6 layout automatically) and writes `.sprint-orchestrator/config.yaml`.
+
+## Install from source
 
 ```bash
 git clone <this-repo>
@@ -23,13 +46,52 @@ Then in Claude Code:
 /plugin install <path-to-this-repo>
 ```
 
-## Usage
+## Story lifecycle
+
+Each story moves through a deterministic pipeline. The orchestrator owns state transitions; LLM subagents only handle implementation and review.
 
 ```
-/sprint-orchestrator:process-backlog
+                       getReadyStories
+                              |
+                              v
+                        +-----------+
+                        |   ready   |
+                        +-----------+
+                              |
+                              | claimStory
+                              v
+                        +-------------+
+                        | in_progress |  <-- dev subagent implements
+                        +-------------+
+                              |
+                              | validateAcceptanceCriteria
+                              v
+                        +-------------+
+                        |  validated  |
+                        +-------------+
+                              |
+                              | commitStoryArtefacts
+                              v
+                        +-------------+
+                        |  committed  |  <-- reviewer subagent inspects
+                        +-------------+
+                            /     \
+            markStoryComplete       markStoryNeedsRework
+                          /           \
+                         v             v
+                  +----------+    +-------------+
+                  | complete |    |   ready     |  (re-queued with notes)
+                  +----------+    +-------------+
 ```
 
-On first run in a project, the plugin asks where your planning docs live (or detects BMAD v6 layout automatically) and writes `.sprint-orchestrator/config.yaml`.
+Key transitions:
+
+- `getReadyStories` — list unblocked stories whose dependencies are satisfied.
+- `claimStory` — atomically reserve a story for one worker (prevents double-claims).
+- `validateAcceptanceCriteria` — run the deterministic checks declared in the story spec.
+- `commitStoryArtefacts` — stage and commit the implementation diff with a structured message.
+- `markStoryComplete` — finalize a story after reviewer approval.
+- `markStoryNeedsRework` — bounce a story back to `ready` with reviewer feedback attached.
 
 ## Modes
 
