@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@sprint-orchestrator/mcp-server": "workspace:*"
+    "@sprint-orchestrator/mcp-server": "workspace:*",
+    "prettier": "^3.3.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^1.6.0"

@@ -38,6 +38,9 @@ importers:
       '@sprint-orchestrator/mcp-server':
         specifier: workspace:*
         version: link:../mcp-server
+      prettier:
+        specifier: ^3.3.0
+        version: 3.8.3
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^1.6.0
