@@ -46,6 +46,53 @@ Then in Claude Code:
 /plugin install <path-to-this-repo>
 ```
 
+## Story lifecycle
+
+Each story moves through a deterministic pipeline. The orchestrator owns state transitions; LLM subagents only handle implementation and review.
+
+```
+                       getReadyStories
+                              |
+                              v
+                        +-----------+
+                        |   ready   |
+                        +-----------+
+                              |
+                              | claimStory
+                              v
+                        +-------------+
+                        | in_progress |  <-- dev subagent implements
+                        +-------------+
+                              |
+                              | validateAcceptanceCriteria
+                              v
+                        +-------------+
+                        |  validated  |
+                        +-------------+
+                              |
+                              | commitStoryArtefacts
+                              v
+                        +-------------+
+                        |  committed  |  <-- reviewer subagent inspects
+                        +-------------+
+                            /     \
+            markStoryComplete       markStoryNeedsRework
+                          /           \
+                         v             v
+                  +----------+    +-------------+
+                  | complete |    |   ready     |  (re-queued with notes)
+                  +----------+    +-------------+
+```
+
+Key transitions:
+
+- `getReadyStories` — list unblocked stories whose dependencies are satisfied.
+- `claimStory` — atomically reserve a story for one worker (prevents double-claims).
+- `validateAcceptanceCriteria` — run the deterministic checks declared in the story spec.
+- `commitStoryArtefacts` — stage and commit the implementation diff with a structured message.
+- `markStoryComplete` — finalize a story after reviewer approval.
+- `markStoryNeedsRework` — bounce a story back to `ready` with reviewer feedback attached.
+
 ## Modes
 
 - **One-shot supervised** — install in Claude Code, run the slash command, watch it process up to 5 ready stories, and stop.
