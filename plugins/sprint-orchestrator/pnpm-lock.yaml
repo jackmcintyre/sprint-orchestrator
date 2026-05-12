@@ -73,6 +73,13 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.1.0
         version: 0.1.77(zod@3.25.76)
+      '@sprint-orchestrator/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
+    devDependencies:
+      yaml:
+        specifier: ^2.4.0
+        version: 2.9.0
 
 packages:
 
