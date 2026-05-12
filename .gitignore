@@ -4,3 +4,8 @@ coverage/
 *.log
 .DS_Store
 .sprint-orchestrator/
+
+# BMad tooling — installed/generated, not source
+_bmad/
+_bmad-output/
+.claude/skills/bmad-*/
