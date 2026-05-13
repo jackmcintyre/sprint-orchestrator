@@ -1,285 +1,141 @@
-sprint_id: goal-adoption
+sprint_id: adopt-skill
 stories:
   - id: "1"
-    title: /sprint-orchestrator:run-sprint wrapper skill with story-count-based turn cap
-    status: done
+    title: "/sprint-orchestrator:adopt skill with LLM drafter, user review, validate-and-write helper"
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint wrapper computes turn cap and
-            invokes goal with the drain condition"
+          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-1
-      claimed_at: 2026-05-13T10:44:31.720Z
-      completed_at: 2026-05-13T10:49:24.529Z
-      summary: Shipped run-sprint wrapper skill that computes turn cap from story count and invokes /goal
-        with the canonical drain condition, plus refusal paths for missing/drained backlogs.
       rework_count: 0
-      artefacts:
-        - git:332ec0ab3b0c92aa271f2b1201d9df5f7ef10596
-        - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/plan-run-sprint.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: |
-      PROBLEM: today the user has to type the full /goal invocation
-      every time they run a sprint:
-        /goal /sprint-orchestrator:process-backlog UNTIL every story
-          in sprint-status.yaml is status=done or status=failed, OR
-          stop after 30 turns
-      That's 25 words of boilerplate, and the turn cap is a guess.
+      Build the universal source-agnostic adopt skill plus a pure-TS validate-and-write helper.
 
-      DECISION: ship a thin wrapper skill at
-      plugins/sprint-orchestrator/skills/run-sprint/SKILL.md that:
-        - Reads sprint-status.yaml from the working directory.
-        - Counts stories (N).
-        - Reads turn_cap_per_story from .sprint-orchestrator/config.yaml
-          (default 3 — matches per-story worst case under the current
-          rework cap of 2).
-        - Computes turn_cap = ceil(N * turn_cap_per_story).
-        - Invokes /goal with the canonical drain condition:
-            /goal /sprint-orchestrator:process-backlog UNTIL every
-              story in sprint-status.yaml is status=done or
-              status=failed, OR stop after <turn_cap> turns
-        - Zero other logic. The wrapper is a thin entrypoint.
+      Full BMad story spec:
+        _bmad-output/implementation-artifacts/1-1-sprint-orchestrator-adopt-path-drafts-a-backlog-via-llm-subagent-pauses-for-user-review-validates-and-writes.md
 
-      BACKLOG VALIDATION (refusal paths):
-        - Missing sprint-status.yaml: refuse with "no backlog found:
-          expected sprint-status.yaml at <cwd>/sprint-status.yaml.
-          Copy a backlog file there before running." No /goal call.
-        - Drained sprint-status.yaml (every story done or failed):
-          refuse with "nothing to run — backlog is drained.
-          Stories: <D> done, <F> failed." No /goal call.
+      What to build:
+        - New skill: plugins/sprint-orchestrator/skills/adopt/SKILL.md
+            * Argument: <path> (required), --force flag (optional)
+            * Spawns an LLM subagent (clean context) to read the source file and propose a conforming sprint-status.yaml draft
+            * Presents the proposal to the user with a diff-style preview against the existing sprint-status.yaml
+            * Pauses for accept / edit / abort
+            * On accept: calls validateAndWriteBacklog
+            * Producer-agnostic: no mention of BMad, Linear, Notion, etc. in the skill body
+        - New helper: plugins/sprint-orchestrator/packages/mcp-server/src/tools/adopt-write.ts
+            * export validateAndWriteBacklog({ proposalYaml, destPath, existingYaml, force })
+            * Reuses lintSprint from packages/mcp-server/src/tools/lint-sprint.ts (do NOT duplicate schema logic)
+            * Uses getOrInitConfig to resolve sprintStatusPath (do NOT hardcode)
+            * Atomic write: temp file + fs.rename
+            * Refuses if existing sprint-status.yaml has any story with status: in_progress and force is false; the refusal message names the in-flight story id
+            * Returns { ok: true, dest } or { ok: false, reason }
+            * Pure function — directly testable from scripts/e2e.ts (no implicit globals)
 
-      CONFIG SHAPE (additive to .sprint-orchestrator/config.yaml):
-        turn_cap_per_story: 3   # optional; default 3
+      Coupling discipline (NFR1, NFR2):
+        - The orchestrator core (MCP server, state machine, process-backlog skill) MUST NOT import adopt-write.ts or anything from skills/adopt/. Coupling is one-way: adopt depends on lintSprint + getOrInitConfig; neither depends on adopt.
+        - Skill body and helper file MUST NOT name any specific producer (BMad/Linear/Notion/Jira). Producer names live only in README (Story 3).
 
-      MUSCLE-MEMORY PRESERVATION: existing invocation paths
-      (/sprint-orchestrator:process-backlog direct, /loop 5m ...,
-      raw /goal ...) must keep working identically. No changes to
-      process-backlog skill's surface or to the MCP tools.
+      AC verification:
+        - pnpm --dir plugins/sprint-orchestrator verify must pass (build + typecheck + lint + unit tests).
+        - Behavioral correctness is verified by Story 2's deterministic e2e mini-run; Story 1's AC is the compile/lint gate only.
 
-      INTEGRATION AC: new e2e assertion sets up a 3-story fixture
-      sprint with turn_cap_per_story unset (defaults to 3), invokes
-      the wrapper skill's computation step (mock the /goal call —
-      we're testing what condition string the wrapper would emit,
-      not actually running /goal in the e2e harness), and asserts:
-        - emitted command string includes "stop after 9 turns"
-          (3 stories * 3 default = 9)
-        - emitted command string includes the canonical drain
-          condition verbatim
-      A second assertion variant overrides turn_cap_per_story: 5 in
-      the fixture config and asserts cap = 15.
-      A third variant fixtures a drained sprint (all stories done)
-      and asserts the wrapper refuses without emitting any command.
-      A fourth variant fixtures a missing sprint-status.yaml and
-      asserts the wrapper refuses with the expected message.
-
-      FILES TO TOUCH:
-        - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md (new)
-        - plugins/sprint-orchestrator/.sprint-orchestrator/config.example.yaml
-          (or wherever the config example lives — add the new field
-          with its default, commented)
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-          (new mini-run + assertion + grep tag)
   - id: "2"
-    title: Three distinct end-of-run summary lines in process-backlog (drain / cap-stop / blocked)
-    status: done
-    depends_on: []
+    title: "Deterministic e2e coverage for adopt — validation refusal, in-flight refusal, golden-fixture happy path"
+    status: ready
+    depends_on: ["1"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "process-backlog prints distinct end-of-run
-            summary lines for drain cap-stop and blocked"
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"adopt validation refusal in-flight refusal golden-fixture happy path\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-2
-      claimed_at: 2026-05-13T10:49:33.660Z
-      completed_at: 2026-05-13T10:53:54.151Z
-      summary: Codified three distinct end-of-run summary lines (drain / cap-stop / blocked) in
-        process-backlog SKILL.md and added e2e mini-runs asserting each line shape.
       rework_count: 0
-      artefacts:
-        - git:c9c65d74700cbedcdc7a3a98799cbaff645e0996
-        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/format-end-of-run-line.ts
-    notes: >
-      PROBLEM: the /goal evaluator (a Haiku-class model) reads the
+    notes: |
+      Add a deterministic e2e mini-run for the adopt helper. The LLM drafting step is NOT covered by this story (explicit non-goal — testing live LLM output makes assertions flaky).
 
-      conversation transcript to decide whether the goal condition
+      Full BMad story spec:
+        _bmad-output/implementation-artifacts/1-2-deterministic-e2e-coverage-for-adopt-validation-refusal-in-flight-refusal-golden-fixture-happy-path.md
 
-      is met. For our condition ("every story in sprint-status.yaml
+      What to build:
+        - Extend plugins/sprint-orchestrator/scripts/e2e.ts with runAdoptValidateAndWriteMiniRun().
+        - Wire into main() behind grep tag exactly: "adopt validation refusal in-flight refusal golden-fixture happy path"
+        - Golden fixture YAMLs in scripts/fixtures/adopt/ (or match the existing convention if one exists):
+            * valid-proposal.yaml — minimal conforming backlog
+            * invalid-proposal.yaml — fails lintSprint
+            * in-flight-existing.yaml — represents a pre-existing destination with a story in status: in_progress
 
-      is status=done or status=failed"), it needs to see something
+      Assertions:
+        (a) Happy path: valid proposal + empty dest -> ok: true, dest contents equal fixture byte-for-byte.
+        (b) Invalid proposal: pre-write a known existing file, invoke with invalid-proposal -> ok: false, reason contains verbatim lint error, dest file is byte-identical to what was pre-written (SHA compare or buffer compare before/after).
+        (c) In-flight refusal: pre-write in-flight-existing.yaml as dest, invoke with valid proposal and force: false -> ok: false, reason names the in-flight story id, dest byte-identical.
 
-      in the transcript that lets it confidently say yes — without
+      Conventions to follow:
+        - Prior mini-runs to mirror: runRunSprintWrapperMiniRun, runProcessBacklogEndOfRunSummaryLinesMiniRun (both in scripts/e2e.ts from prior sprints).
+        - Use temp dirs for destinations.
+        - Direct import of validateAndWriteBacklog from packages/mcp-server/src/tools/adopt-write.ts — do not invoke the skill body.
 
-      mistaking a partial run, a hard-cap stop, or a blocked state
-
-      for a drain.
-
-
-      Today the process-backlog skill ends with a terse summary that
-
-      worked once in testing but hasn't been validated for sprints
-
-      with failures, sprints that hit the 5-story hard cap, or
-
-      sprints that end on a blocked: signal.
-
-
-      DECISION: codify three distinct, greppable end-of-run lines so
-
-      the evaluator (and humans) can disambiguate at a glance.
-
-
-      BEHAVIOUR (skills/process-backlog/SKILL.md):
-        - When the main loop exits because getReadyStories returned
-          []:
-            Final printed line is exactly:
-              "Sprint drain confirmed: 0 ready stories remaining. Outcome: <D> done, <F> failed."
-            Where D = count of stories with status=done in
-            sprint-status.yaml, F = count of stories with
-            status=failed.
-        - When the main loop exits because the 5-story hard cap was
-          hit (not drain):
-            Final printed line is exactly:
-              "Sprint paused at hard cap: <K> ready stories remaining. Outcome so far: <D> done, <F> failed."
-            Where K = current getReadyStories count, D/F as above.
-        - When the main loop exits because the reviewer returned
-          "blocked: ..." (story 2 of orchestrator-reviewer-fixes):
-            Final printed line is exactly:
-              "Sprint blocked: <reason>. <K> ready stories remaining."
-
-      Line shapes are FIXED. Future changes to the surrounding
-
-      narrative are fine; the final-line grammar is the contract
-
-      with the /goal evaluator and must not drift.
-
-
-      INTEGRATION AC: new e2e assertion runs three mini-sprints
-
-      (one drain, one cap-stop, one blocked) via the existing
-
-      process-backlog skill harness, captures each run's transcript,
-
-      and asserts:
-        - drain run: final line matches "Sprint drain confirmed: 0 ready stories remaining. Outcome: <int> done, <int> failed."
-        - cap-stop run: final line matches "Sprint paused at hard cap: <int> ready stories remaining. Outcome so far: <int> done, <int> failed."
-        - blocked run: final line matches "Sprint blocked: <reason>. <int> ready stories remaining."
-
-      FILES TO TOUCH:
-        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-          (end-of-run summary contract: three distinct lines as
-           specified above)
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-          (new mini-run + 3 assertions + grep tag)
-
-      Independent of story 1 — different surface (skill end-of-run
-
-      output vs new wrapper skill).
   - id: "3"
-    title: README documents /sprint-orchestrator:run-sprint as recommended entrypoint
-    status: done
-    depends_on:
-      - "1"
-      - "2"
+    title: "README documents adopt as recommended entrypoint and names the in-plugin adaptor pattern"
+    status: ready
+    depends_on: ["1", "2"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "README documents run-sprint wrapper computed
-            turn cap and end-of-run summary lines"
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"README documents adopt and the in-plugin adaptor pattern\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-3
-      claimed_at: 2026-05-13T10:54:04.344Z
-      completed_at: 2026-05-13T10:56:52.043Z
-      summary: README's Running-a-sprint section now leads with /sprint-orchestrator:run-sprint, documents
-        the computed turn cap formula, raw /goal manual override, /loop fallback, and the three
-        end-of-run summary line shapes; new e2e assertions cover all of this.
       rework_count: 0
-      artefacts:
-        - git:054ac6428d3e932be3eafdb883612aca0b197d7d
-        - plugins/sprint-orchestrator/README.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: |
-      PROBLEM: even with the wrapper skill and tightened summary
-      lines in place, the README still tells users to run
-      /loop 5m /sprint-orchestrator:process-backlog. Muscle memory
-      will steer users away from /goal unless docs lead with it.
+      Rewrite the README "Running a sprint" section to lead with adopt, name the adaptor pattern, and state the one-way coupling rule in prose. Lock the assertion phrases to a single source of truth.
 
-      DECISION: rewrite the README's "Running a sprint" section to
-      lead with /sprint-orchestrator:run-sprint; document raw /goal
-      as the manual override for ad-hoc conditions; mention /loop
-      only as a fallback for when /goal misbehaves.
+      Full BMad story spec:
+        _bmad-output/implementation-artifacts/1-3-readme-documents-adopt-as-the-recommended-entrypoint-and-names-the-in-plugin-adaptor-pattern.md
 
-      BEHAVIOUR (README.md):
-        - "Running a sprint" section starts with /sprint-orchestrator:run-sprint
-          and a one-line description.
-        - Explains the computed turn cap rule:
-            cap = ceil(story_count * turn_cap_per_story)
-            default turn_cap_per_story = 3
-            override via .sprint-orchestrator/config.yaml
-        - Documents the raw /goal invocation as manual override:
-            /goal /sprint-orchestrator:process-backlog UNTIL every
-              story in sprint-status.yaml is status=done or
-              status=failed, OR stop after <N> turns
-          (canonical condition string shown verbatim so users can
-          adapt it.)
-        - Mentions /loop 5m /sprint-orchestrator:process-backlog as
-          fallback for /goal misbehaviour. Not the primary path.
-        - Documents the three end-of-run summary lines from story
-          2 so readers can recognise drain vs cap-stop vs blocked
-          when watching a run.
+      What to build:
+        - Edit plugins/sprint-orchestrator/README.md "Running a sprint" section:
+            * Lead with /sprint-orchestrator:adopt <path> as recommended entrypoint for any external planning context.
+            * Describe the flow in 2-4 sentences: source -> LLM subagent drafts -> user review (accept/edit/abort) -> on accept, lintSprint validates -> write to sprint-status.yaml.
+            * Immediately after, a short paragraph naming the adaptor pattern as the in-plugin extension point for producer-specific fast paths.
+            * Cite BMad as one possible example, framed as: "BMad is one example; the pattern works for any producer that can emit a conforming backlog."
+            * State the one-way coupling rule in prose: the orchestrator core does not import adaptors; adaptors depend on the schema, never the reverse.
+            * Make explicit no adaptors ship in this sprint — pattern documented for future extension.
+            * PRESERVE the existing run-sprint + cap formula + end-of-run summary lines content (from the prior sprint). Adopt is prepended, not a replacement.
 
-      INTEGRATION AC: new e2e assertion reads README.md and asserts:
-        - "/sprint-orchestrator:run-sprint" appears before any
-          mention of /loop in the Running-a-sprint section.
-        - The exact string "ceil(story_count * turn_cap_per_story)"
-          (or equivalent — the formula must be present and
-          unambiguous) appears in the README.
-        - All three end-of-run line shapes from story 2 appear
-          verbatim (or close enough that future grep-by-prefix
-          works).
+        - Lock assertion phrases to a constants module (mirror packages/mcp-server/src/tools/format-end-of-run-line.ts pattern). Suggested file: packages/mcp-server/src/tools/readme-adopt-phrases.ts (or similar).
 
-      FILES TO TOUCH:
-        - plugins/sprint-orchestrator/README.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-          (new mini-run + assertions + grep tag)
+        - Producer-name scan (this story's responsibility to verify, not patch):
+            * grep -ri "bmad|linear|notion|jira" plugins/sprint-orchestrator/skills/adopt/ plugins/sprint-orchestrator/packages/mcp-server/src/tools/adopt-write.ts
+            * Expect zero hits. If hits exist, this is a Story 1 bug — surface in the reviewer feedback.
 
-      Depends on stories 1 and 2 because the README documents both
-      the wrapper and the summary-line shapes. Should be last
-      substantive story before ship gate.
+        - e2e mini-run: runReadmeDocumentsAdoptAndAdaptorPatternMiniRun() in scripts/e2e.ts.
+            * Reads README, extracts "Running a sprint" section.
+            * Asserts: (a) "/sprint-orchestrator:adopt" present in that section, (b) "adaptor pattern" phrase present, (c) one-way-coupling statement present (use the constant), (d) grep tag matches "README documents adopt and the in-plugin adaptor pattern".
+
+      Out of scope:
+        - Building any adaptor (e.g. bmad-to-orchestrator). README names the pattern only.
+        - Authoring a separate schema doc. README may link to lintSprint as the schema source of truth.
+
   - id: "4"
-    title: Ship gate — pnpm e2e + verify green
-    status: done
-    depends_on:
-      - "1"
-      - "2"
-      - "3"
+    title: "Ship gate — pnpm e2e + verify green"
+    status: ready
+    depends_on: ["1", "2", "3"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e"
           expect_exit: 0
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-4
-      claimed_at: 2026-05-13T10:57:02.340Z
       rework_count: 0
-      completed_at: 2026-05-13T10:58:31.657Z
-      summary: "Ship gate passed: full e2e (34/34) and verify (pnpm -r build/typecheck/lint/test) both
-        green, confirming stories 1-3 integrate cleanly."
     notes: |
-      Per planning-discipline rule 3. Full unfiltered e2e + verify
-      proves stories 1-3 integrate cleanly and don't regress
-      existing assertions.
+      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate cleanly and don't regress existing assertions.
 
-      If this fails, the reviewer should rework the offending prior
-      story, not record this one as failed.
+      If this fails, the reviewer should rework the offending prior story, not record this one as failed.
+
+      Full BMad story spec:
+        _bmad-output/implementation-artifacts/1-4-ship-gate-pnpm-e2e-verify-green.md
