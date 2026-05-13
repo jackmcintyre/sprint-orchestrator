@@ -66,10 +66,10 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-adopt-2
       claimed_at: 2026-05-13T12:00:11.387Z
-      rework_count: 0
       completed_at: 2026-05-13T12:04:12.067Z
       summary: Added deterministic e2e mini-run for adopt validateAndWriteBacklog covering happy path,
         invalid-proposal refusal, and in-flight refusal with byte-for-byte dest assertions.
+      rework_count: 0
       artefacts:
         - git:c5ff97fe4c92e8d90adfbbce6e5437333c5809c0
         - plugins/sprint-orchestrator/scripts/e2e.ts
@@ -101,7 +101,7 @@ stories:
         - Direct import of validateAndWriteBacklog from packages/mcp-server/src/tools/adopt-write.ts — do not invoke the skill body.
   - id: "3"
     title: README documents adopt as recommended entrypoint and names the in-plugin adaptor pattern
-    status: ready
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -112,7 +112,18 @@ stories:
             adaptor pattern"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-adopt-3
+      claimed_at: 2026-05-13T12:04:22.094Z
       rework_count: 0
+      completed_at: 2026-05-13T12:07:48.454Z
+      summary: README "Running a sprint" section now leads with /sprint-orchestrator:adopt, names the
+        in-plugin adaptor pattern with one-way coupling rule, and is locked to a phrases constants
+        module with an e2e mini-run guarding the assertions.
+      artefacts:
+        - git:7870f9c8a3a51c6e3cc94560a1e61c15c1474729
+        - plugins/sprint-orchestrator/README.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-adopt-phrases.ts
     notes: >
       Rewrite the README "Running a sprint" section to lead with adopt, name the adaptor pattern,
       and state the one-way coupling rule in prose. Lock the assertion phrases to a single source of
