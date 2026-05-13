@@ -1,110 +1,162 @@
-sprint_id: pr-per-story-sprint-1.1
+sprint_id: pr-per-story-1-triage
 stories:
   - id: "1"
-    title: Add pr_per_story and default_base to OrchestratorConfig (passive)
-    status: done
+    title: prepareStoryBranch refuses if default_base lacks the orchestrator schema
+    status: failed
     depends_on: []
     acceptance_criteria:
       checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-          pattern: pr_per_story
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-          pattern: default_base
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "refuses when default_base lacks orchestrator
+            schema"
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-pps11-1
-      claimed_at: 2026-05-13T03:44:29.726Z
-      completed_at: 2026-05-13T03:47:17.183Z
-      summary: Added passive pr_per_story (default true) and default_base (default "main") fields to
-        OrchestratorConfig with round-trip support and tests; no behavior change yet.
-      artefacts:
-        - git:136274526b44ebc6b20b165f6a145b4ed738b229
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/config.test.ts
+      claimed_by: dev-loop-20260513
+      claimed_at: 2026-05-13T04:46:35.348Z
+      rework_count: 0
+      last_failure_reason: "Acceptance criteria failed: shell"
+      failed_at: 2026-05-13T04:46:53.888Z
     notes: |
-      Add two optional fields to OrchestratorConfig:
-        - pr_per_story?: boolean   // default TRUE (PM call: this becomes
-                                   // the default workflow; existing
-                                   // shared-branch mode is the opt-out)
-        - default_base?: string    // default "main"
+      PROBLEM: When invoked on a feature branch whose `default_base`
+      (e.g. `main`) lags behind on the orchestrator schema version, the
+      per-story branch is rooted at a stale base. State commits then
+      diff against the OLD schema, producing 200+ lines of unrelated
+      noise that will pollute every story's PR (this is what the
+      retest hit on slice 1.1 — 239-line chore commit).
 
-      Read both from .sprint-orchestrator/config.yaml; pass through in the
-      tool's return value. NO BEHAVIOR CHANGE in this story — the fields are
-      consumed in story 2.
+      DECISION: refuse rather than auto-rebase. Rebasing the user's
+      `default_base` is a destructive surprise; refusing-with-message
+      lets the user fix it explicitly.
 
-      Tests: config without either field defaults pr_per_story=true and
-      default_base="main"; explicit `pr_per_story: false` round-trips
-      (proves the opt-out works); explicit default_base="develop" round-trips.
+      BEHAVIOUR:
+        - On first per-story branch creation, prepareStoryBranch reads
+          sprint-status.yaml from `default_base` (via `git show
+          <default_base>:sprint-status.yaml`).
+        - Compare its schema version (or top-level shape) to the
+          schema the running MCP server expects.
+        - If mismatch: return { branch: null, skipped: true,
+          reason: "default_base-stale", message: "default_base '<X>'
+          is missing orchestrator schema version <Y>. Either rebase
+          '<X>' onto your invocation branch or set default_base in
+          .sprint-orchestrator/config.yaml." }.
+        - If `default_base` == current HEAD, skip the check.
+        - process-backlog skill: when prepareStoryBranch returns
+          skipped=true with reason="default_base-stale", surface the
+          message and STOP the run. Do NOT silently fall back to
+          shared-branch mode — that hides the misconfiguration.
+
+      INTEGRATION AC: new e2e assertion sets up a temp repo with
+      `default_base=main`, advances the invocation branch with a
+      schema-shaped change, drives one story with pr_per_story=true,
+      asserts prepareStoryBranch returns reason="default_base-stale"
+      and HEAD did not move.
+
+      FILES TO TOUCH:
+        - packages/mcp-server/src/tools/prepare-story-branch.ts
+        - packages/mcp-server/__tests__/tools.test.ts (unit)
+        - scripts/e2e.ts (new assertion + grep tag)
+        - skills/process-backlog/SKILL.md (handle the skipped reason)
   - id: "2"
-    title: Branch-per-story when flag is on (local only, no push)
-    status: done
+    title: prepareStoryBranch roots from the last completed dependency's branch tip
+    status: ready
     depends_on:
       - "1"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "branch-per-story"
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"branch-per-story: dependent story's branch
+            is rooted at the dependency's branch tip\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-pps11-2
-      claimed_at: 2026-05-13T03:47:43.060Z
-      completed_at: 2026-05-13T03:55:40.855Z
-      summary: Added prepareStoryBranch MCP tool that creates a per-story branch from default_base when
-        pr_per_story is enabled (no-op otherwise), wired it into the process-backlog skill, and
-        extended the e2e harness with a branch-per-story assertion plus an opt-out mini-run.
-      artefacts:
-        - git:e60b661d1d5cc815e0d6cf855b132722f88a53b6
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/prepare-story-branch.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
+      rework_count: 0
     notes: |
-      When pr_per_story is true, the orchestrator creates a per-story branch
-      from default_base before the dev subagent starts work. The dev's commits
-      then land on that branch. When pr_per_story is false, behavior is
-      unchanged (commits go on whatever branch is checked out).
+      PROBLEM: With per-story branches all rooted from `default_base`
+      (typically `main`), a story whose `depends_on` includes an
+      already-finished story can't see its predecessor's commits. Dev
+      subagent then either fails its AC or manually rebases — both
+      bad. The retest hit this between stories 1.1 and 1.2.
 
-      Recommended implementation: a new MCP tool `prepareStoryBranch(storyId,
-      agentId)` called by the process-backlog skill between claimStory and
-      spawning the dev subagent. The tool:
-        - Reads config; no-ops if pr_per_story is false (returns { branch: null }).
-        - If true: computes branch name `<story-id>-<slug-of-title>` (lowercase,
-          alphanumerics+hyphens, max 40 chars).
-        - Runs `git checkout -b <branch> <default_base>` from ctx.projectRoot.
-        - Persists `branch` on story.orchestrator so slice 1.2 (push) can read it.
-        - Returns { branch }.
+      BEHAVIOUR:
+        - prepareStoryBranch reads `depends_on` for the target story.
+        - If non-empty AND every listed dep has status=done AND each
+          dep has `orchestrator.branch` populated AND each branch
+          still exists locally:
+            - Root the new per-story branch from the last (most recent
+              `completed_at`) dep's branch tip instead of `default_base`.
+            - Record the chosen base on `orchestrator.base_branch`.
+        - If any dep is missing a branch (e.g. it ran with
+          pr_per_story=false), fall back to `default_base` and record
+          `orchestrator.base_branch_fallback_reason`.
+        - Chain (1 -> 2 -> 3): story 3 roots at story 2's tip
+          (transitively contains story 1).
 
-      Skill update: process-backlog calls prepareStoryBranch right after
-      claimStory succeeds, before spawning the dev subagent.
+      Crucial: this does NOT auto-merge. Each per-story branch is
+      still independent; we're just choosing a more useful base so
+      the dev agent doesn't see a missing-deps state.
 
-      E2E harness: with pr_per_story now defaulting to TRUE, the fixture
-      sprint will exercise branch-per-story by default. Add a new assertion
-      "branch-per-story: story A's commits land on its own branch when flag
-      is on". The existing 7 assertions must continue to pass under the new
-      default (most are agnostic to which branch the commits land on; verify
-      no assertion has implicit branch-name expectations).
+      INTEGRATION AC: e2e harness already has stories A and B with B
+      depending on A. Add an assertion that B's per-story branch's
+      first commit's parent is reachable from A's branch tip (and
+      that A's commits appear in B's `git log`).
 
-      Add a second mini-run within the same e2e to exercise the
-      pr_per_story=false code path: spin up a second temp repo with the
-      flag explicitly off, drive one happy story, assert commits land on
-      the initial branch (not a feature branch). This guards the opt-out
-      path against future regressions.
-
-      Out of scope (slice 1.2): pushing the branch, opening a PR, auto-merge,
-      anything that touches origin or gh.
+      FILES TO TOUCH:
+        - packages/mcp-server/src/tools/prepare-story-branch.ts
+        - packages/mcp-server/__tests__/tools.test.ts (unit)
+        - scripts/e2e.ts (new assertion + grep tag)
+        - packages/mcp-server/src/state/schema.ts
+          (add orchestrator.base_branch field)
   - id: "3"
+    title: Investigate and fix stray cross-session state-persist commits
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "no orchestrator commits appear without a
+            tool call in the current session"
+          expect_exit: 0
+    orchestrator:
+      rework_count: 0
+    notes: |
+      PROBLEM: between two test sessions on the same branch
+      (retest-pps-1.1), a commit `chore(sprint): persist 1.1 failure`
+      appeared without any orchestrator activity in the new session.
+      Reproduction unknown. Possible causes:
+        - The MCP server replays a state mutation on restart from
+          run.log or some persisted in-flight transaction.
+        - A previous session left an orphaned write that landed when
+          the new session opened the lock.
+        - A hook (post-tool-use stop / commit) ran on restart due to
+          a stale claim.
+
+      INVESTIGATION FIRST, THEN FIX:
+        Phase A — repro: drive a story to claim, kill the MCP server
+        mid-flight (before commitStoryArtefacts), restart, then start
+        a fresh session. Observe whether a stray commit appears. If
+        yes, write the e2e assertion that catches it.
+        Phase B — fix: depends on phase A's findings. Candidates:
+          - post-tool-use commit hook ignores stale claims.
+          - On server start, do not auto-emit any state mutation —
+            require an explicit tool call.
+          - releaseStaleClaims releases without committing.
+
+      RISK: this story may be larger than it looks. If phase A repro
+      requires heavy harness changes, split into 3a (repro + assertion)
+      and 3b (fix). Phase A's deliverable IS a new e2e assertion that
+      currently fails — that's the integration AC.
+
+      FILES LIKELY TO TOUCH:
+        - packages/mcp-server/src/index.ts
+        - packages/mcp-server/src/tools/release-stale-claims.ts
+        - packages/hooks/src/post-tool-use.ts
+        - scripts/e2e.ts
+  - id: "4"
     title: Ship gate — pnpm e2e green
-    status: done
+    status: ready
     depends_on:
       - "1"
       - "2"
+      - "3"
     acceptance_criteria:
       checks:
         - type: shell
@@ -114,15 +166,13 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-pps11-3
-      claimed_at: 2026-05-13T03:56:05.778Z
-      completed_at: 2026-05-13T03:57:47.092Z
-      summary: "Ship gate verified: pnpm e2e (11/11 assertions) and pnpm verify (build, typecheck, lint,
-        116 tests) both pass on the integrated slice."
-      artefacts:
-        - git:b870ee83a69a91d6c95e953ea0c61aa5bd96bd4f
+      rework_count: 0
     notes: |
-      Per the discipline rule documented in process-backlog/SKILL.md, every
-      sprint ends with a ship gate story whose AC runs the full e2e suite.
-      No production code change here; this story exists to prove the slice
-      integrates cleanly end-to-end.
+      Per planning-discipline.md rule 3: every sprint ends with a ship
+      gate that runs the full unfiltered `pnpm e2e` and `pnpm verify`.
+      No implementation work — just the contract that stories 1-3
+      delivered without regressing existing assertions.
+
+      If this story fails, the sprint cannot close. The reviewer
+      should flag the regressed prior story and recordStoryRework on
+      it rather than recordStorySuccess on this one.
