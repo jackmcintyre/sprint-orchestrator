@@ -188,7 +188,7 @@ stories:
         - Editing other README sections (adopt, process-backlog) unless those edits are required to keep the "Running a sprint" section coherent.
   - id: "4"
     title: Ship gate — pnpm e2e + verify green
-    status: in_progress
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -213,6 +213,11 @@ stories:
         intentional for matching OSC 52 escape sequences). This is a one-line-per-site fix; do not
         refactor the mini-run logic."
       last_review_at: 2026-05-13T12:59:39.004Z
+      completed_at: 2026-05-13T13:08:33.100Z
+      summary: "Ship gate green: pnpm e2e (78/78) and pnpm verify both exit 0 after narrow eslint-disable
+        comments for intentional OSC 52 control-char regexes."
+      artefacts:
+        - git:fc8d28972e5860999f665efbe5ebb87d8c7e0f85
     notes: >
       Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
       cleanly and don't regress existing assertions.
