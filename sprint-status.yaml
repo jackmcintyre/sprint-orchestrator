@@ -1,180 +1,253 @@
-sprint_id: pr-per-story-1-triage
+# Sprint orchestrator-reviewer-fixes — triage-2.
+#
+# Reason: the pr-per-story-1.1-triage sprint (PR #18) shipped but
+# required manual recovery on stories 1 and 3.
+# _bmad-output/planning-artifacts/retro-triage-1-sprint.md captures
+# the three defects this sprint addresses:
+#
+#   A1. Reviewer escalates to recordStoryFailure on the first AC miss
+#       without trying recordStoryRework, even when dev produced code.
+#   A2. State machine has no recovery path from `failed` — only manual
+#       sprint-status.yaml surgery.
+#   B.  Reviewer returns "done:" / "failed:" with inline error text
+#       when an MCP call is rejected, swallowing state-machine errors.
+#   C.  lintSprint doesn't validate that shell `cmd` fields are
+#       YAML-safe; story 2 of the triage sprint crashed on parse.
+#
+# Runs BEFORE PR-per-story slice 1.2. Slice 1.2's per-story branching
+# is unproven in real sprints (see retro-triage-1-sprint.md, item D)
+# and we don't want this sprint's state-machine work to layer on top
+# of an unproven workflow.
+#
+# Status: planned, not active. To run:
+#   1. Move this file to _bmad-output/planning-artifacts/.
+#   2. Cut new branch `orchestrator-reviewer-fixes` off main.
+#   3. Copy this file to repo-root sprint-status.yaml (uncommitted —
+#      no kickoff commit, the orchestrator's first state commit will
+#      sweep it in).
+#   4. Run /sprint-orchestrator:process-backlog (under /loop or /goal).
+
+sprint_id: orchestrator-reviewer-fixes
 stories:
   - id: "1"
-    title: prepareStoryBranch refuses if default_base lacks the orchestrator schema
-    status: done
+    title: Reviewer tries recordStoryRework before recordStoryFailure when dev produced code
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "refuses when default_base lacks orchestrator
-            schema"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "reviewer escalates to rework, not failure, on first AC miss after dev produced code"
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-loop-20260513
-      claimed_at: 2026-05-13T04:46:35.348Z
-      completed_at: 2026-05-13T05:30:00.000Z
-      rework_count: 0
-      manual_recovery: code on dbbd276; AC re-verified post-fact; reviewer hard-failed without rework —
-        see follow-up
+    orchestrator: {}
     notes: |
-      PROBLEM: When invoked on a feature branch whose `default_base`
-      (e.g. `main`) lags behind on the orchestrator schema version, the
-      per-story branch is rooted at a stale base. State commits then
-      diff against the OLD schema, producing 200+ lines of unrelated
-      noise that will pollute every story's PR (this is what the
-      retest hit on slice 1.1 — 239-line chore commit).
+      PROBLEM: in the pr-per-story-1.1-triage run, two stories
+      hard-failed at rework_count: 0 on the first AC miss even though
+      the dev subagent had produced a feat commit. The reviewer
+      called recordStoryFailure directly, bypassing the rework loop
+      entirely. Result: implementation was correct (verified after
+      the fact), but the state machine refused failed -> done and
+      blocked the dependents.
 
-      DECISION: refuse rather than auto-rebase. Rebasing the user's
-      `default_base` is a destructive surprise; refusing-with-message
-      lets the user fix it explicitly.
+      DECISION: only call recordStoryFailure on first reviewer pass
+      when there is NO new dev code (no feat commit since claim).
+      Otherwise call recordStoryRework with the AC failure as the
+      feedback string. The existing rework cap will still escalate to
+      recordStoryFailure once the dev has had its allotted retries.
 
-      BEHAVIOUR:
-        - On first per-story branch creation, prepareStoryBranch reads
-          sprint-status.yaml from `default_base` (via `git show
-          <default_base>:sprint-status.yaml`).
-        - Compare its schema version (or top-level shape) to the
-          schema the running MCP server expects.
-        - If mismatch: return { branch: null, skipped: true,
-          reason: "default_base-stale", message: "default_base '<X>'
-          is missing orchestrator schema version <Y>. Either rebase
-          '<X>' onto your invocation branch or set default_base in
-          .sprint-orchestrator/config.yaml." }.
-        - If `default_base` == current HEAD, skip the check.
-        - process-backlog skill: when prepareStoryBranch returns
-          skipped=true with reason="default_base-stale", surface the
-          message and STOP the run. Do NOT silently fall back to
-          shared-branch mode — that hides the misconfiguration.
+      BEHAVIOUR (reviewer subagent prompt, agents/reviewer.md):
+        - After running ACs, before deciding success/rework/failure:
+          - If any AC failed:
+            - If `git log <claimed_at>..HEAD` shows a feat commit
+              touching code (not just sprint-status.yaml): call
+              recordStoryRework with the failure reason. Return
+              "rework: <id> — <reason>".
+            - If there is no new dev code: call recordStoryFailure.
+              Return "failed: <id> — <reason>" with the same reason.
+          - All ACs pass: call recordStorySuccess. Return "done: <id>".
+        - On a rework retry where dev has produced new code BUT the
+          rework cap has been reached: still call recordStoryFailure
+          (the cap path) — recordStoryRework's capReached signal
+          handles that automatically.
 
-      INTEGRATION AC: new e2e assertion sets up a temp repo with
-      `default_base=main`, advances the invocation branch with a
-      schema-shaped change, drives one story with pr_per_story=true,
-      asserts prepareStoryBranch returns reason="default_base-stale"
-      and HEAD did not move.
+      INTEGRATION AC: new e2e assertion sets up a story whose AC will
+      fail, lets the dev subagent commit a feat that doesn't satisfy
+      the AC, then drives the reviewer once and asserts:
+        - story.orchestrator.rework_count == 1
+        - story.status == "in_progress" (or whatever the rework state
+          actually is — see existing rework path)
+        - story.status != "failed"
+        - sprint-status.yaml has no failed_at on this story
 
       FILES TO TOUCH:
-        - packages/mcp-server/src/tools/prepare-story-branch.ts
-        - packages/mcp-server/__tests__/tools.test.ts (unit)
-        - scripts/e2e.ts (new assertion + grep tag)
-        - skills/process-backlog/SKILL.md (handle the skipped reason)
-  - id: "2"
-    title: prepareStoryBranch roots from the last completed dependency's branch tip
-    status: done
-    depends_on:
-      - "1"
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"branch-per-story: dependent story's branch
-            is rooted at the dependency's branch tip\""
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-loop-20260513-s2
-      claimed_at: 2026-05-13T05:19:20.367Z
-      completed_at: 2026-05-13T05:23:55.265Z
-      summary: prepareStoryBranch now roots a story's per-story branch from the most recent completed
-        dependency's branch tip, with fallback reason recorded when deps lack branches.
-      rework_count: 0
-      artefacts:
-        - git:55d84b96974796d211064d074d0c1e2a55be1a3b
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/prepare-story-branch.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
+        - plugins/sprint-orchestrator/agents/reviewer.md
         - plugins/sprint-orchestrator/scripts/e2e.ts
-        - sprint-status.yaml
-    notes: |
-      PROBLEM: With per-story branches all rooted from `default_base`
-      (typically `main`), a story whose `depends_on` includes an
-      already-finished story can't see its predecessor's commits. Dev
-      subagent then either fails its AC or manually rebases — both
-      bad. The retest hit this between stories 1.1 and 1.2.
+          (new mini-run + assertion + grep tag)
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          (interpretation of the new "rework:" path stays the same;
+          minor wording update to make the contract explicit)
 
-      BEHAVIOUR:
-        - prepareStoryBranch reads `depends_on` for the target story.
-        - If non-empty AND every listed dep has status=done AND each
-          dep has `orchestrator.branch` populated AND each branch
-          still exists locally:
-            - Root the new per-story branch from the last (most recent
-              `completed_at`) dep's branch tip instead of `default_base`.
-            - Record the chosen base on `orchestrator.base_branch`.
-        - If any dep is missing a branch (e.g. it ran with
-          pr_per_story=false), fall back to `default_base` and record
-          `orchestrator.base_branch_fallback_reason`.
-        - Chain (1 -> 2 -> 3): story 3 roots at story 2's tip
-          (transitively contains story 1).
-
-      Crucial: this does NOT auto-merge. Each per-story branch is
-      still independent; we're just choosing a more useful base so
-      the dev agent doesn't see a missing-deps state.
-
-      INTEGRATION AC: e2e harness already has stories A and B with B
-      depending on A. Add an assertion that B's per-story branch's
-      first commit's parent is reachable from A's branch tip (and
-      that A's commits appear in B's `git log`).
-
-      FILES TO TOUCH:
-        - packages/mcp-server/src/tools/prepare-story-branch.ts
-        - packages/mcp-server/__tests__/tools.test.ts (unit)
-        - scripts/e2e.ts (new assertion + grep tag)
-        - packages/mcp-server/src/state/schema.ts
-          (add orchestrator.base_branch field)
-  - id: "3"
-    title: Investigate and fix stray cross-session state-persist commits
-    status: done
+  - id: "2"
+    title: Reviewer returns distinct "blocked:" status when an MCP call is rejected
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "no orchestrator commits appear without a
-            tool call in the current session"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "reviewer returns blocked status when state machine rejects recordStorySuccess"
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-loop-20260513-s3
-      claimed_at: 2026-05-13T04:52:19.970Z
-      completed_at: 2026-05-13T05:30:00.000Z
-      rework_count: 0
-      manual_recovery: code on c2195a1; AC re-verified post-fact; reviewer hard-failed without rework —
-        see follow-up
+    orchestrator: {}
     notes: |
-      PROBLEM: between two test sessions on the same branch
-      (retest-pps-1.1), a commit `chore(sprint): persist 1.1 failure`
-      appeared without any orchestrator activity in the new session.
-      Reproduction unknown. Possible causes:
-        - The MCP server replays a state mutation on restart from
-          run.log or some persisted in-flight transaction.
-        - A previous session left an orphaned write that landed when
-          the new session opened the lock.
-        - A hook (post-tool-use stop / commit) ran on restart due to
-          a stale claim.
+      PROBLEM: in the triage-1 run, the reviewer attempted
+      recordStorySuccess on stories that were already in `failed`
+      state (re-claimed manually). The MCP server rejected with
+      "Cannot transition story X from failed to done", but the
+      reviewer returned "done: X" or "failed: X" with the inline
+      error text. The orchestrator skill treated the response as a
+      normal status line and moved on. The bookkeeping was silently
+      broken; only Jack noticed.
 
-      INVESTIGATION FIRST, THEN FIX:
-        Phase A — repro: drive a story to claim, kill the MCP server
-        mid-flight (before commitStoryArtefacts), restart, then start
-        a fresh session. Observe whether a stray commit appears. If
-        yes, write the e2e assertion that catches it.
-        Phase B — fix: depends on phase A's findings. Candidates:
-          - post-tool-use commit hook ignores stale claims.
-          - On server start, do not auto-emit any state mutation —
-            require an explicit tool call.
-          - releaseStaleClaims releases without committing.
+      BEHAVIOUR (reviewer subagent prompt, agents/reviewer.md):
+        - Wrap every MCP state-mutating call (recordStoryRework,
+          recordStorySuccess, recordStoryFailure) in error-aware
+          handling.
+        - On rejection, return ONE of:
+            "blocked: <id> — state-machine rejected <toolName>: <error>"
+        - The skill (skills/process-backlog/SKILL.md) treats
+          "blocked: ..." as a hard stop signal: log it prominently
+          and end the run with that status. Do not continue to the
+          next ready story (the bookkeeping issue likely affects
+          others).
 
-      RISK: this story may be larger than it looks. If phase A repro
-      requires heavy harness changes, split into 3a (repro + assertion)
-      and 3b (fix). Phase A's deliverable IS a new e2e assertion that
-      currently fails — that's the integration AC.
+      INTEGRATION AC: new e2e assertion sets up a story in `failed`
+      state, then runs the reviewer pass against it as if AC passed.
+      Assert:
+        - reviewer's stdout includes "blocked: <id>"
+        - story.status remains "failed" (no silent transition)
+        - run.log contains a "blocked" event
 
-      FILES LIKELY TO TOUCH:
-        - packages/mcp-server/src/index.ts
-        - packages/mcp-server/src/tools/release-stale-claims.ts
-        - packages/hooks/src/post-tool-use.ts
-        - scripts/e2e.ts
+      FILES TO TOUCH:
+        - plugins/sprint-orchestrator/agents/reviewer.md
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          (new "blocked:" handling — stop the run, surface message)
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+          (new mini-run + assertion + grep tag)
+
+      Composes naturally with story 1 (both touch the reviewer
+      agent's decision flow) but is independent — different code
+      paths, different ACs. Don't merge into one story; two integration
+      ACs covering two distinct misbehaviours.
+
+  - id: "3"
+    title: Add recordStoryReopen MCP tool for state-machine recovery from failed
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "recordStoryReopen transitions a failed story back to ready and clears failure fields"
+          expect_exit: 0
+    orchestrator: {}
+    notes: |
+      PROBLEM: even with story 1 landed (reviewer-rework-first), some
+      stories will still legitimately reach `failed` (rework cap,
+      no-code failures). The triage-1 run showed there's no recovery
+      path that doesn't involve YAML surgery. Hand-editing
+      sprint-status.yaml defeats the point of having a state machine.
+
+      DECISION: keep `failed` as a meaningful terminal state for the
+      automated workflow (the reviewer cannot transition out of it),
+      but expose an explicit `recordStoryReopen` tool the human (or a
+      future supervisor agent) calls to reset.
+
+      BEHAVIOUR (new MCP tool, prepare-style):
+        - recordStoryReopen(storyId, reason): transitions a story
+          from `failed` back to `ready`. Clears:
+            - orchestrator.failed_at
+            - orchestrator.last_failure_reason
+            - orchestrator.claimed_by
+            - orchestrator.claimed_at
+          Preserves:
+            - rework_count (for audit — show the prior attempts)
+            - notes
+            - any base_branch / branch fields from a prior partial run
+        - Records on orchestrator.reopen_history[]:
+            - { reopened_at, reason, prior_status: "failed",
+                prior_failure_reason: "..." }
+        - Refuses if status != "failed" (use other tools for other
+          transitions — this isn't a free reset).
+        - Commits the state mutation as `chore(sprint): reopen <id> —
+          <reason>` so the audit trail is in git.
+
+      INTEGRATION AC: new e2e assertion fails a story (drive it
+      through to status=failed with rework cap), then calls
+      recordStoryReopen. Asserts:
+        - story.status == "ready"
+        - reopen_history has one entry with the reason
+        - rework_count preserved (>= 1)
+        - getReadyStories now includes the story
+        - chore commit present in git log
+
+      FILES TO TOUCH:
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/record-story-reopen.ts (new)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts (register tool)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts (add reopen_history)
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts (unit)
+        - plugins/sprint-orchestrator/scripts/e2e.ts (mini-run + grep tag)
+        - plugins/sprint-orchestrator/README.md (document recovery path)
+
+      Independent of stories 1 and 2 — different surface (new tool vs
+      reviewer prompt). Can ship in any order.
+
   - id: "4"
+    title: lintSprint validates that every shell `cmd` field is YAML-safe
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "lintSprint flags shell cmd fields with unquoted YAML-special characters"
+          expect_exit: 0
+    orchestrator: {}
+    notes: |
+      PROBLEM: triage-1 story 2 had cmd:
+        cmd: pnpm ... --grep "branch-per-story: dependent ..."
+      The unquoted apostrophe + colon caused YAML.parse to fail with
+      "Nested mappings are not allowed in compact mappings" — and
+      getReadyStories crashed mid-run. Hand-fixed by quoting.
+
+      lintSprint (existing MCP tool from bugfix-2 story #7) already
+      checks shell ACs are dry-runnable. It should also check the
+      cmd's STRING REPRESENTATION is YAML-safe by re-parsing it.
+
+      BEHAVIOUR (lint-sprint.ts):
+        - For every story.acceptance_criteria.checks[*] of type shell:
+          - Take the raw text of the cmd field as it would appear in
+            YAML (after the dump round-trip).
+          - Build a synthetic YAML doc:  `cmd: <value>\n`
+          - Parse it. If parse fails OR the parsed value !== original,
+            flag the story:
+              issue: "shell cmd contains YAML-ambiguous characters
+                (likely unquoted ':' or quote chars). Quote the cmd
+                value: cmd: \"<original>\"."
+              location: stories[<id>].acceptance_criteria.checks[<i>].cmd
+        - Existing dry-run check stays. Two checks per shell AC now.
+
+      INTEGRATION AC: new e2e assertion writes a fixture sprint with a
+      story whose cmd is `pnpm e2e --grep "x: y"` (unquoted), runs
+      lintSprint via the MCP tool, asserts the issue list contains a
+      YAML-safety entry pointing at that cmd's location.
+
+      FILES TO TOUCH:
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/lint-sprint.test.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts (mini-run + grep tag)
+
+      Smallest story in the sprint. No dependency on 1-3.
+
+  - id: "5"
     title: Ship gate — pnpm e2e green
-    status: done
-    depends_on:
-      - "1"
-      - "2"
-      - "3"
+    status: ready
+    depends_on: ["1", "2", "3", "4"]
     acceptance_criteria:
       checks:
         - type: shell
@@ -183,20 +256,10 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-loop-20260513-s4
-      claimed_at: 2026-05-13T05:24:07.292Z
-      rework_count: 0
-      completed_at: 2026-05-13T05:25:18.569Z
-      summary: "feat(4): Ship gate — pnpm e2e green"
-      artefacts:
-        - git:0b405cee674fc5ea8539b50a91b38849d24d867f
+    orchestrator: {}
     notes: |
-      Per planning-discipline.md rule 3: every sprint ends with a ship
-      gate that runs the full unfiltered `pnpm e2e` and `pnpm verify`.
-      No implementation work — just the contract that stories 1-3
-      delivered without regressing existing assertions.
+      Per planning-discipline rule 3. Full unfiltered e2e + verify
+      proves stories 1-4 didn't regress existing assertions.
 
-      If this story fails, the sprint cannot close. The reviewer
-      should flag the regressed prior story and recordStoryRework on
-      it rather than recordStorySuccess on this one.
+      If this fails, the reviewer should rework the offending prior
+      story, not record this one as failed.
