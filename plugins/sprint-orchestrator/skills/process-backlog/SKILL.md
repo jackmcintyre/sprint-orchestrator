@@ -7,6 +7,7 @@ allowed-tools:
   - "mcp__sprint-orchestrator__getSprintStatus"
   - "mcp__sprint-orchestrator__getReadyStories"
   - "mcp__sprint-orchestrator__claimStory"
+  - "mcp__sprint-orchestrator__prepareStoryBranch"
   - "mcp__sprint-orchestrator__releaseStaleClaims"
   - "Task"
 ---
@@ -25,13 +26,14 @@ Repeat until either `getReadyStories` returns `[]` or you have completed **5 sto
 1. Call `getReadyStories`. If empty, write a one-line summary of what was done across the run and stop.
 2. Pick the first ready story `S`. Generate a fresh agent ID: `dev-<session-id-or-timestamp>`.
 3. Call `claimStory` with `S.id` and that agent ID. If `claimed` is false (another orchestrator beat you to it), skip to the next ready story.
-4. Spawn a `dev` subagent via the `Task` tool. Pass the story ID in the prompt. Wait for it to return.
-5. Spawn a `reviewer` subagent for the same story ID via `Task`, passing both the story ID and the same agent ID you used in step 3. The reviewer will call `recordStorySuccess`, `recordStoryRework`, or `recordStoryFailure` itself.
-6. After the reviewer returns, inspect its one-line status:
+4. Call `prepareStoryBranch` with `S.id` and the same agent ID. When `pr_per_story` is enabled in config (the default), this creates and checks out a per-story branch from `default_base` so the dev's commits land on it; when disabled, it returns `{ branch: null, skipped: true }` and you proceed unchanged.
+5. Spawn a `dev` subagent via the `Task` tool. Pass the story ID in the prompt. Wait for it to return.
+6. Spawn a `reviewer` subagent for the same story ID via `Task`, passing both the story ID and the same agent ID you used in step 3. The reviewer will call `recordStorySuccess`, `recordStoryRework`, or `recordStoryFailure` itself.
+7. After the reviewer returns, inspect its one-line status:
    - `done: <id>` — log it and move on to the next ready story.
    - `rework: <id> — <reason>` — the reviewer left the claim in place and incremented `rework_count`. Re-spawn the `dev` subagent for the same story ID (it will read `last_review_feedback` from the story and address it), then re-spawn the `reviewer` for the same story and `agentId`. Repeat until the reviewer returns `done` or `failed`. The `recordStoryRework` tool enforces a cap (default 2) — once `capReached` is true the reviewer will escalate to `recordStoryFailure` on its next pass, so the rework sub-loop terminates on its own.
    - `failed: <id> — <reason>` — log it and move on.
-7. Loop.
+8. Loop.
 
 ## Rules
 

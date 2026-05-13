@@ -2,7 +2,7 @@ sprint_id: pr-per-story-sprint-1.1
 stories:
   - id: "1"
     title: Add pr_per_story and default_base to OrchestratorConfig (passive)
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -18,6 +18,13 @@ stories:
     orchestrator:
       claimed_by: dev-pps11-1
       claimed_at: 2026-05-13T03:44:29.726Z
+      completed_at: 2026-05-13T03:47:17.183Z
+      summary: Added passive pr_per_story (default true) and default_base (default "main") fields to
+        OrchestratorConfig with round-trip support and tests; no behavior change yet.
+      artefacts:
+        - git:136274526b44ebc6b20b165f6a145b4ed738b229
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/config.test.ts
     notes: |
       Add two optional fields to OrchestratorConfig:
         - pr_per_story?: boolean   // default TRUE (PM call: this becomes
@@ -34,7 +41,7 @@ stories:
       (proves the opt-out works); explicit default_base="develop" round-trips.
   - id: "2"
     title: Branch-per-story when flag is on (local only, no push)
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
     acceptance_criteria:
@@ -45,7 +52,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "branch-per-story"
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-pps11-2
+      claimed_at: 2026-05-13T03:47:43.060Z
     notes: |
       When pr_per_story is true, the orchestrator creates a per-story branch
       from default_base before the dev subagent starts work. The dev's commits

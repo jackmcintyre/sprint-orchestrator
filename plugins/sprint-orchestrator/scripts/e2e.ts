@@ -26,6 +26,7 @@ import { claimStory } from "../packages/mcp-server/src/tools/claim-story.js";
 import { commitStoryArtefacts } from "../packages/mcp-server/src/tools/commit-story-artefacts.js";
 import { markStoryComplete } from "../packages/mcp-server/src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../packages/mcp-server/src/tools/mark-story-failed.js";
+import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-story-branch.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
 import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
@@ -186,6 +187,14 @@ interface DriveResult {
   shasAfter: string[];
   commitMessages: string[];
   filesInLastTwoCommits: string[][];
+  /** Branch HEAD was on at the moment the dev would commit (post-prepare). */
+  branchAtCommitTime: string;
+  /** Branch returned from prepareStoryBranch, or null when skipped. */
+  preparedBranch: string | null;
+}
+
+function currentBranch(cwd: string): string {
+  return git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
 }
 
 async function driveHappyPathStory(
@@ -203,8 +212,16 @@ async function driveHappyPathStory(
   const claim = await claimStory(ctx, storyId, agent);
   if (!claim.claimed) throw new Error(`could not claim ${storyId}: holder=${claim.holder ?? "?"}`);
 
+  // Mirror the real process-backlog skill: between claimStory and the dev
+  // subagent we prepare the per-story branch. This is a no-op when
+  // pr_per_story is false; otherwise it checks out `<id>-<slug>` from
+  // default_base.
+  const prep = await prepareStoryBranch(ctx, storyId, agent);
+
   // Simulate the dev subagent making code changes.
   if (prepareWorkingTree) await prepareWorkingTree();
+
+  const branchAtCommitTime = currentBranch(ctx.projectRoot);
 
   // Real flow: dev commits artefacts FIRST, then markStoryComplete persists state.
   await commitStoryArtefacts(ctx, storyId);
@@ -225,7 +242,14 @@ async function driveHappyPathStory(
       .map((l) => l.trim())
       .filter(Boolean),
   );
-  return { shasBefore: before, shasAfter: after, commitMessages, filesInLastTwoCommits };
+  return {
+    shasBefore: before,
+    shasAfter: after,
+    commitMessages,
+    filesInLastTwoCommits,
+    branchAtCommitTime,
+    preparedBranch: prep.branch,
+  };
 }
 
 async function driveFailingStory(
@@ -421,7 +445,153 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
         );
       },
     },
+    {
+      name: "branch-per-story: story A's commits land on its own branch when flag is on",
+      run: () => {
+        // pr_per_story defaults to true, so prepareStoryBranch should have
+        // checked out a per-story branch named `<id-slug>-<title-slug>`.
+        const expectedBranch = "a-happy-path-story";
+        expect(
+          happy.preparedBranch === expectedBranch,
+          `expected preparedBranch=${expectedBranch}, got ${String(happy.preparedBranch)}`,
+        );
+        expect(
+          happy.branchAtCommitTime === expectedBranch,
+          `expected HEAD on ${expectedBranch} at commit time, got ${happy.branchAtCommitTime}`,
+        );
+        // Both A's commits must be reachable from the per-story branch tip
+        // and NOT from main (because main was never advanced).
+        const branchCommits = git(ctx.projectRoot, ["rev-list", expectedBranch])
+          .stdout.trim()
+          .split("\n")
+          .filter(Boolean);
+        const newShas = happy.shasAfter.filter((s) => !happy.shasBefore.includes(s));
+        for (const sha of newShas) {
+          expect(branchCommits.includes(sha), `commit ${sha} not reachable from ${expectedBranch}`);
+        }
+        const mainCommits = git(ctx.projectRoot, ["rev-list", "main"])
+          .stdout.trim()
+          .split("\n")
+          .filter(Boolean);
+        for (const sha of newShas) {
+          expect(
+            !mainCommits.includes(sha),
+            `commit ${sha} unexpectedly reachable from main (story-branch should be local only)`,
+          );
+        }
+        // And the story state should record the branch so downstream tooling
+        // (push / PR open in slice 1.2) can read it back.
+        expect(
+          (storyA!.orchestrator as Record<string, unknown>).branch === expectedBranch,
+          `story A orchestrator.branch=${String((storyA!.orchestrator as Record<string, unknown>).branch)} (expected ${expectedBranch})`,
+        );
+      },
+    },
   ];
+}
+
+/**
+ * Mini-run: spin up a second temp repo with `pr_per_story: false` set
+ * explicitly in `.sprint-orchestrator/config.yaml`, drive one happy story,
+ * and verify the dev's commits land on the initial branch (no per-story
+ * branch is created). Guards the opt-out path against future regressions.
+ */
+async function runOptOutMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+  // Write a config with pr_per_story explicitly disabled. The fixture itself
+  // does not ship a .sprint-orchestrator/ dir, and getOrInitConfig will not
+  // detect a BMAD layout here (no docs/prd.md) — so without an explicit
+  // config the tool would no-op via the "no-config" branch. Writing the
+  // config makes the assertion specifically about the opt-out flag.
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const initialBranch = currentBranch(root);
+
+  const outcomes: AssertionOutcome[] = [];
+  try {
+    const happy = await driveHappyPathStory(ctx, "A", "agent-A-optout", async () => {
+      await fs.writeFile(path.join(root, "src", "hello.txt"), "hello (opt-out)\n", "utf8");
+    });
+    const finalBranch = currentBranch(root);
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyA = finalState.stories.find((s) => s.id === "A");
+
+    const checks: Assertion[] = [
+      {
+        name: "branch-per-story opt-out: prepareStoryBranch returns null when pr_per_story=false",
+        run: () => {
+          expect(
+            happy.preparedBranch === null,
+            `expected preparedBranch=null, got ${String(happy.preparedBranch)}`,
+          );
+        },
+      },
+      {
+        name: "branch-per-story opt-out: HEAD stays on the initial branch (no feature branch created)",
+        run: () => {
+          expect(
+            happy.branchAtCommitTime === initialBranch,
+            `expected commit-time branch=${initialBranch}, got ${happy.branchAtCommitTime}`,
+          );
+          expect(
+            finalBranch === initialBranch,
+            `expected final branch=${initialBranch}, got ${finalBranch}`,
+          );
+        },
+      },
+      {
+        name: "branch-per-story opt-out: commits land on the initial branch and story.orchestrator.branch is unset",
+        run: () => {
+          const branchCommits = git(root, ["rev-list", initialBranch])
+            .stdout.trim()
+            .split("\n")
+            .filter(Boolean);
+          const newShas = happy.shasAfter.filter((s) => !happy.shasBefore.includes(s));
+          expect(newShas.length === 2, `expected 2 new commits, got ${newShas.length}`);
+          for (const sha of newShas) {
+            expect(
+              branchCommits.includes(sha),
+              `commit ${sha} not reachable from ${initialBranch}`,
+            );
+          }
+          expect(
+            (storyA!.orchestrator as Record<string, unknown>).branch === undefined,
+            `expected no orchestrator.branch when opted out, got ${String(
+              (storyA!.orchestrator as Record<string, unknown>).branch,
+            )}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
 }
 
 async function main(): Promise<number> {
@@ -469,6 +639,16 @@ async function main(): Promise<number> {
     await fs.rm(root, { recursive: true, force: true });
   } else {
     console.log(`[e2e] --keep set; temp repo preserved at ${root}`);
+  }
+
+  // Second mini-run: exercise the pr_per_story=false opt-out path. Filtered
+  // by the same --grep so `--grep "branch-per-story"` still picks up the
+  // primary assertion above without forcing this run, but the default
+  // (un-filtered) e2e exercises both.
+  if (!filter || filter.test("branch-per-story opt-out")) {
+    console.log("[e2e] mini-run: pr_per_story opt-out");
+    const optOutOutcomes = await runOptOutMiniRun();
+    outcomes.push(...optOutOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);

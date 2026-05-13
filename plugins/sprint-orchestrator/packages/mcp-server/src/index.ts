@@ -16,6 +16,7 @@ import { releaseStaleClaims } from "./tools/release-stale-claims.js";
 import { getOrInitConfig } from "./tools/get-or-init-config.js";
 import { commitStoryArtefacts } from "./tools/commit-story-artefacts.js";
 import { lintSprint } from "./tools/lint-sprint.js";
+import { prepareStoryBranch } from "./tools/prepare-story-branch.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -101,6 +102,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { storyId: z.string(), agentId: z.string() },
     },
     async ({ storyId, agentId }) => json(await claimStory(ctx, storyId, agentId)),
+  );
+
+  server.registerTool(
+    "prepareStoryBranch",
+    {
+      title: "Prepare per-story branch",
+      description:
+        "Create and check out a `<story-id>-<slug>` branch from `default_base` so the dev subagent's commits land on a per-story branch. No-ops (returns { branch: null, skipped: true }) when `pr_per_story` is false. Persists the branch on `story.orchestrator.branch` for downstream tooling. Local-only — never touches origin or gh.",
+      inputSchema: { storyId: z.string(), agentId: z.string() },
+    },
+    async ({ storyId, agentId }) => json(await prepareStoryBranch(ctx, storyId, agentId)),
   );
 
   server.registerTool(
