@@ -34,6 +34,11 @@ import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { validateAndWriteBacklog } from "../packages/mcp-server/src/tools/adopt-write.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
 import {
+  FRESH_CONTEXT_GUIDANCE_LINE,
+  buildRunSprintFinalOutput,
+  formatGoalCommandLine,
+} from "../packages/mcp-server/src/tools/run-sprint-output-format.js";
+import {
   countTerminalOutcomes,
   formatBlockedLine,
   formatCapStopLine,
@@ -1760,6 +1765,139 @@ async function runRunSprintWrapperMiniRun(): Promise<AssertionOutcome[]> {
 }
 
 /**
+ * Mini-run for the goal-adoption sprint story 1: run-sprint emits the
+ * `/goal` command on a guaranteed single, last line of stdout, preceded
+ * by a one-line fresh-context-window guidance note. The format is locked
+ * by `run-sprint-output-format.ts` so the skill and this assertion stay
+ * in lockstep.
+ */
+async function runRunSprintGoalLastLineMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const turnCaps = [1, 9, 15, 42];
+
+  for (const turnCap of turnCaps) {
+    const a: Assertion = {
+      name: "run-sprint emits goal on guaranteed last line with fresh-context guidance",
+      run: () => {
+        const block = buildRunSprintFinalOutput(turnCap);
+        const goalLine = formatGoalCommandLine(turnCap);
+
+        // (a) ends with the canonical /goal line for N (plus exactly one trailing newline).
+        expect(
+          block.endsWith(`${goalLine}\n`),
+          `expected block to end with the /goal line + single \\n, got: ${JSON.stringify(block)}`,
+        );
+
+        // The /goal line is the literal final non-empty line of stdout.
+        // Strip the single trailing newline, then the last line must equal goalLine.
+        const trimmed = block.endsWith("\n") ? block.slice(0, -1) : block;
+        const lines = trimmed.split("\n");
+        expect(
+          lines[lines.length - 1] === goalLine,
+          `expected last line to be the /goal command, got: ${JSON.stringify(lines[lines.length - 1])}`,
+        );
+
+        // (b) /goal line contains no embedded newlines.
+        expect(
+          !goalLine.includes("\n"),
+          `expected /goal line to have no embedded newlines, got: ${JSON.stringify(goalLine)}`,
+        );
+        expect(
+          goalLine.includes(`stop after ${turnCap} turns`),
+          `expected /goal line to contain 'stop after ${turnCap} turns', got: ${goalLine}`,
+        );
+
+        // (c) second-to-last non-empty line is the fresh-context guidance string.
+        const nonEmpty = lines.filter((l) => l.length > 0);
+        expect(
+          nonEmpty.length >= 2,
+          `expected at least two non-empty lines in final block, got: ${JSON.stringify(lines)}`,
+        );
+        expect(
+          nonEmpty[nonEmpty.length - 2] === FRESH_CONTEXT_GUIDANCE_LINE,
+          `expected second-to-last non-empty line to equal FRESH_CONTEXT_GUIDANCE_LINE, got: ${JSON.stringify(nonEmpty[nonEmpty.length - 2])}`,
+        );
+
+        // (d) nothing follows the /goal line except at most one trailing \n.
+        const afterGoal = block.slice(block.lastIndexOf(goalLine) + goalLine.length);
+        expect(
+          afterGoal === "" || afterGoal === "\n",
+          `expected nothing after /goal line except at most one \\n, got: ${JSON.stringify(afterGoal)}`,
+        );
+
+        // Sanity: the constant itself is non-empty and single-line.
+        expect(
+          FRESH_CONTEXT_GUIDANCE_LINE.length > 0 && !FRESH_CONTEXT_GUIDANCE_LINE.includes("\n"),
+          `expected FRESH_CONTEXT_GUIDANCE_LINE to be non-empty single line, got: ${JSON.stringify(FRESH_CONTEXT_GUIDANCE_LINE)}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name} (turnCap=${turnCap})`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name} (turnCap=${turnCap})\n        ${msg}`);
+    }
+  }
+
+  // Integration sanity: planRunSprint() produces a command string equal to the
+  // /goal line that buildRunSprintFinalOutput would print for the same cap.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-runsprint-goal-lastline-"));
+  try {
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "run-sprint-goal-lastline-fixture"',
+      "stories:",
+      '  - id: "S1"',
+      '    title: "story S1"',
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/S1.txt",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(tmp, "sprint-status.yaml"), sprintYaml, "utf8");
+
+    const plan = await planRunSprint({ cwd: tmp });
+
+    const a: Assertion = {
+      name: "run-sprint emits goal on guaranteed last line with fresh-context guidance",
+      run: () => {
+        expect(plan.kind === "ok", `expected kind=ok, got ${JSON.stringify(plan)}`);
+        if (plan.kind !== "ok") return;
+        const block = buildRunSprintFinalOutput(plan.turnCap);
+        expect(
+          block.endsWith(`${plan.command}\n`),
+          `expected final block to end with planner's command + \\n. block=${JSON.stringify(block)} command=${JSON.stringify(plan.command)}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name} (planner integration)`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name} (planner integration)\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
  * Story 2 — end-of-run summary contract for /sprint-orchestrator:process-backlog.
  *
  * Three distinct, greppable final lines tell the /goal evaluator
@@ -2544,6 +2682,17 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: run-sprint wrapper turn cap + refusal paths");
     const runSprintOutcomes = await runRunSprintWrapperMiniRun();
     outcomes.push(...runSprintOutcomes);
+  }
+
+  // goal-adoption sprint, story 1: run-sprint locks the /goal command as the
+  // literal last line of stdout, preceded by a one-line fresh-context note.
+  if (
+    !filter ||
+    filter.test("run-sprint emits goal on guaranteed last line with fresh-context guidance")
+  ) {
+    console.log("[e2e] mini-run: run-sprint goal-on-last-line + fresh-context guidance");
+    const goalLastLineOutcomes = await runRunSprintGoalLastLineMiniRun();
+    outcomes.push(...goalLastLineOutcomes);
   }
 
   // Eleventh mini-run (story 3): README documents /sprint-orchestrator:run-sprint
