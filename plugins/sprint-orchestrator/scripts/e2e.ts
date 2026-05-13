@@ -611,6 +611,129 @@ async function runOptOutMiniRun(): Promise<AssertionOutcome[]> {
   return outcomes;
 }
 
+/**
+ * Mini-run: spin up a temp repo whose `main` branch's sprint-status.yaml is
+ * missing the current `schema_version`, advance the invocation branch with a
+ * schema-shaped change, and drive one story with `pr_per_story=true`. Asserts
+ * that `prepareStoryBranch` refuses with `reason="default_base-stale"` and
+ * does NOT move HEAD off the invocation branch. Guards against the
+ * 200+-line-chore-commit regression captured on slice 1.1.
+ */
+async function runStaleBaseMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  // The initial commit (setupTempRepo) seeded main with the fixture, which
+  // ships `schema_version: 1`. Rewrite main's sprint-status to drop the
+  // schema_version field so it looks "stale" to a server expecting v1, then
+  // commit that on main directly.
+  const sprintPath = path.join(root, "sprint-status.yaml");
+  const original = await fs.readFile(sprintPath, "utf8");
+  const stale = original.replace(/^schema_version:.*\n/m, "");
+  await fs.writeFile(sprintPath, stale, "utf8");
+  const stageStale = git(root, ["add", "sprint-status.yaml"]);
+  if (stageStale.status !== 0) throw new Error(`stage stale failed: ${stageStale.stderr}`);
+  const commitStale = git(root, [
+    "commit",
+    "-q",
+    "-m",
+    "main: drop schema_version (simulate stale)",
+  ]);
+  if (commitStale.status !== 0) throw new Error(`commit stale failed: ${commitStale.stderr}`);
+
+  // Now create a feature branch and re-add schema_version on it — this is
+  // the "invocation branch advances with a schema-shaped change" the story
+  // calls out. The fixture's other branches/files are untouched.
+  const invocation = "feat/schema-bump";
+  const checkoutFeat = git(root, ["checkout", "-q", "-b", invocation]);
+  if (checkoutFeat.status !== 0) throw new Error(`checkout feat failed: ${checkoutFeat.stderr}`);
+  await fs.writeFile(sprintPath, original, "utf8");
+  const stageFeat = git(root, ["add", "sprint-status.yaml"]);
+  if (stageFeat.status !== 0) throw new Error(`stage feat failed: ${stageFeat.stderr}`);
+  const commitFeat = git(root, ["commit", "-q", "-m", "feat: bump schema_version to 1"]);
+  if (commitFeat.status !== 0) throw new Error(`commit feat failed: ${commitFeat.stderr}`);
+
+  // Configure pr_per_story=true with default_base=main so the new check
+  // fires.
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: true",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const branchBefore = currentBranch(root);
+  const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+  // Drive: claim then call prepareStoryBranch. We deliberately do NOT call
+  // the full happy-path driver — once prepareStoryBranch refuses, the skill
+  // is meant to stop, so faking a commit on top would defeat the assertion.
+  await logStoryStart(root, "A", "agent-stale");
+  const claim = await claimStory(ctx, "A", "agent-stale");
+
+  const outcomes: AssertionOutcome[] = [];
+  try {
+    if (!claim.claimed) throw new Error(`could not claim A: holder=${claim.holder ?? "?"}`);
+    const prep = await prepareStoryBranch(ctx, "A", "agent-stale");
+    const branchAfter = currentBranch(root);
+    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+    const checks: Assertion[] = [
+      {
+        name: "refuses when default_base lacks orchestrator schema: prep.skipped=true with reason=default_base-stale",
+        run: () => {
+          expect(prep.skipped === true, `expected prep.skipped=true, got ${String(prep.skipped)}`);
+          expect(
+            prep.reason === "default_base-stale",
+            `expected reason=default_base-stale, got ${String(prep.reason)}`,
+          );
+          expect(prep.branch === null, `expected branch=null, got ${String(prep.branch)}`);
+          expect(
+            typeof prep.message === "string" && prep.message.includes("default_base"),
+            `expected message to mention default_base, got ${String(prep.message)}`,
+          );
+        },
+      },
+      {
+        name: "refuses when default_base lacks orchestrator schema: HEAD does not move off the invocation branch",
+        run: () => {
+          expect(
+            branchAfter === branchBefore,
+            `expected HEAD on ${branchBefore}, got ${branchAfter}`,
+          );
+          expect(
+            headAfter === headBefore,
+            `expected HEAD sha unchanged (${headBefore}), got ${headAfter}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -634,11 +757,10 @@ async function main(): Promise<number> {
   }
 
   const filtered = filter ? assertions.filter((a) => filter.test(a.name)) : assertions;
-  if (filter && filtered.length === 0) {
-    console.error(`[e2e] --grep ${args.grep} matched 0 assertions`);
-    if (!args.keep) await fs.rm(root, { recursive: true, force: true });
-    return 1;
-  }
+  // Note: we do NOT bail out here when --grep matches 0 primary assertions —
+  // the mini-runs below (opt-out, default_base-stale) run their own
+  // assertions and may match the same --grep. The final tally below
+  // surfaces a hard failure if 0 assertions total ran.
 
   for (const a of filtered) {
     try {
@@ -668,11 +790,22 @@ async function main(): Promise<number> {
     outcomes.push(...optOutOutcomes);
   }
 
+  // Third mini-run: exercise the stale-default_base refusal path.
+  if (!filter || filter.test("refuses when default_base lacks orchestrator schema")) {
+    console.log("[e2e] mini-run: default_base-stale refusal");
+    const staleOutcomes = await runStaleBaseMiniRun();
+    outcomes.push(...staleOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
       (filter ? ` (grep=${args.grep})` : ""),
   );
+  if (outcomes.length === 0) {
+    console.error(`[e2e] --grep ${args.grep} matched 0 assertions across primary + mini-runs`);
+    return 1;
+  }
   return failed.length === 0 ? 0 : 1;
 }
 

@@ -55,9 +55,20 @@ export const Story = z
   .passthrough();
 export type Story = z.infer<typeof Story>;
 
+/**
+ * Schema version the running MCP server expects to find in
+ * `sprint-status.yaml`. Bump when the on-disk shape changes in a way the
+ * server depends on; `prepareStoryBranch` reads the `default_base`'s
+ * sprint-status and refuses to create a per-story branch when its
+ * `schema_version` does not match this constant (see
+ * prepare-story-branch.ts for the rationale).
+ */
+export const SCHEMA_VERSION = 1;
+
 export const SprintStatus = z
   .object({
     sprint_id: z.string().min(1),
+    schema_version: z.number().int().optional(),
     stories: z.array(Story),
   })
   .passthrough();

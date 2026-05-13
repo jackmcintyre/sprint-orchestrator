@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
+import * as YAML from "yaml";
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
+import { SCHEMA_VERSION } from "../state/schema.js";
 import { getOrInitConfig } from "./get-or-init-config.js";
 import { type ToolContext } from "./context.js";
 
@@ -13,6 +15,12 @@ export interface PrepareStoryBranchResult {
   skipped: boolean;
   /** Reason for a skip, useful for debugging. Absent when branch was created. */
   reason?: string;
+  /**
+   * Human-readable explanation, populated alongside `reason` when the skip
+   * is something the orchestrator skill should surface to the user (e.g.
+   * `default_base-stale`).
+   */
+  message?: string;
 }
 
 /**
@@ -69,6 +77,43 @@ export async function prepareStoryBranch(
     return { branch: null, skipped: true, reason: "pr_per_story-disabled" };
   }
   const base = cfg.default_base ?? "main";
+
+  // Refuse early if `default_base` lags behind on the orchestrator schema
+  // version. When the per-story branch is rooted at a stale base, every
+  // state commit on the new branch diffs against the OLD schema and drags
+  // along hundreds of lines of unrelated noise into the PR. Rebasing the
+  // user's `default_base` would be a destructive surprise, so we surface
+  // the mismatch and stop instead — see story 1 in the
+  // pr-per-story-1-triage backlog for the full rationale.
+  const headRef = git(ctx.projectRoot, ["rev-parse", "HEAD"]).stdout.trim();
+  const baseRef = git(ctx.projectRoot, ["rev-parse", base]).stdout.trim();
+  if (baseRef && baseRef !== headRef) {
+    const baseStatus = git(ctx.projectRoot, ["show", `${base}:sprint-status.yaml`]);
+    if (baseStatus.status === 0) {
+      let baseSchemaVersion: unknown;
+      try {
+        const parsed = YAML.parse(baseStatus.stdout) as { schema_version?: unknown } | null;
+        baseSchemaVersion = parsed?.schema_version;
+      } catch {
+        baseSchemaVersion = undefined;
+      }
+      if (baseSchemaVersion !== SCHEMA_VERSION) {
+        return {
+          branch: null,
+          skipped: true,
+          reason: "default_base-stale",
+          message:
+            `default_base '${base}' is missing orchestrator schema version ${SCHEMA_VERSION} ` +
+            `(found ${baseSchemaVersion === undefined ? "none" : String(baseSchemaVersion)}). ` +
+            `Either rebase '${base}' onto your invocation branch or set default_base in ` +
+            `.sprint-orchestrator/config.yaml.`,
+        };
+      }
+    }
+    // If `git show` failed (e.g. base does not yet have sprint-status.yaml
+    // at all), fall through to the existing behaviour — `git checkout -b`
+    // will surface any real problem with the base ref.
+  }
 
   // Read story (without yet acquiring write lock) to compute branch name.
   // We don't need to enforce claim ownership here — the skill only calls

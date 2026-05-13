@@ -1,4 +1,5 @@
 sprint_id: tiny-sprint-e2e
+schema_version: 1
 stories:
   - id: "A"
     title: Happy path story
