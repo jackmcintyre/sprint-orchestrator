@@ -1,242 +1,368 @@
-sprint_id: orchestrator-bugfix-sprint-1
+# Sprint bugfix-2 — REGRESSION FIRST.
+#
+# Reason for rewrite: end-to-end retest of post-#15 build (sprint-test,
+# branch retest-bugfix-1) found 3 of 6 bugfix-1 fixes don't actually work
+# in practice. Three "ship gate" stories are added to make this class of
+# regression impossible going forward.
+#
+# Status: planned, not active. To run:
+#   1. Cut new branch `bugfix-sprint-2` off main.
+#   2. Copy this file to repo-root sprint-status.yaml.
+#   3. Run /sprint-orchestrator:process-backlog (under /loop 5m).
+
+sprint_id: orchestrator-bugfix-sprint-2
 stories:
+  # ============================================================
+  # Phase 1 — Enabling: build the gate before fixing under it
+  # ============================================================
+  # Order matters. The e2e harness is built FIRST so every regression fix
+  # below has a real-world test it must satisfy. Without the harness, we
+  # repeat bugfix-1's mistake.
+
   - id: "1"
-    title: Split state and code commits in commitStoryArtefacts
-    status: done
+    title: Build e2e harness — fixture sprint + pnpm e2e script
+    status: ready
     depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: plugins/sprint-orchestrator/__fixtures__/tiny-sprint/sprint-status.yaml
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/package.json
+          pattern: '"e2e"'
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    orchestrator: {}
+    notes: |
+      Build a tiny end-to-end test harness that exercises the orchestrator
+      against a real (but throwaway) git repo.
+
+      Components:
+        - __fixtures__/tiny-sprint/ — a self-contained fixture with:
+          - A throwaway sprint-status.yaml with 2 stories (1 happy-path,
+            1 designed to hit rework cap).
+          - A minimal source tree the dev subagent can modify.
+          - A .gitignore that excludes .DS_Store and friends.
+        - scripts/e2e.ts — programmatically:
+          1. Copies fixture into a temp git repo (init, initial commit).
+          2. Spins up the MCP server pointed at the temp repo.
+          3. Drives the orchestrator state machine through the full flow:
+             claimStory -> (simulated dev edit) -> validateAcceptanceCriteria
+             -> commitStoryArtefacts -> markStoryComplete (or *Failed).
+          4. Asserts post-conditions:
+             - Two distinct commits per happy-path story (code + state)
+             - sprint-status.yaml shape: status=done, completed_at present
+             - Failed story: status="failed" (not "blocked")
+             - Auto-promotion: backlog story with done dep gets returned
+               by getReadyStories without manual flip
+             - No stray junk files committed (.DS_Store, .sprint-orchestrator/)
+             - run.log contains story_start + story_end with correct outcomes
+          5. Tears down temp repo.
+        - package.json: "e2e": "tsx scripts/e2e.ts"
+
+      Acceptance: pnpm e2e exits 0 against the current (broken) build.
+      Stories 2-5 below WILL fail this initially — that's the point. Each
+      regression fix must make e2e pass without regressing other assertions.
+
+      This story has no dev-side runtime dependencies (it just adds a script);
+      the assertions it makes will fail until later stories land. That's
+      fine — it sets the bar that other stories must clear.
+
+  # ============================================================
+  # Phase 2 — Regression fixes (each gated on the e2e harness)
+  # ============================================================
+
+  - id: "2"
+    title: Wire markStoryComplete to commit sprint-status.yaml separately
+    status: ready
+    depends_on: ["1"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-complete.ts
+          pattern: "git commit"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "two commits per happy-path story"
+          expect_exit: 0
+      # NOTE on the second e2e check: scripts/e2e.ts must support a --grep
+      # flag that filters its assertions to only those whose name matches.
+      # Story 1 must implement this. (Lesson learned: never ship an AC
+      # check that uses a flag we haven't verified the script supports.)
+    orchestrator: {}
+    notes: |
+      ROOT CAUSE OF BUG 1: bugfix-1 story #1 added the
+      `:!sprint-status.yaml` exclusion in commitStoryArtefacts but no
+      story ever wired markStoryComplete to commit sprint-status.yaml
+      separately. Result: state mutations sit in the working tree until
+      the NEXT story's commitStoryArtefacts slurps them up.
+
+      Fix: markStoryComplete (after writing the state mutation) runs:
+        git add sprint-status.yaml
+        git commit -m "chore(sprint): persist <story-id> completion" \
+          --trailer "Co-authored-by: Claude <noreply@anthropic.com>"
+
+      Idempotent: if `git status sprint-status.yaml` shows nothing, skip
+      the commit (returns gracefully — state was already persisted, e.g.
+      from a no-op write).
+
+      Suspected secondary issue worth verifying: the pathspec
+      `":!sprint-status.yaml"` may need a positive-pathspec partner or
+      `--` separator. Confirm by inspection of dist/ post-fix and add a
+      direct shell check to the e2e harness that runs commitStoryArtefacts
+      with sprint-status.yaml dirty and asserts it's NOT in the commit.
+
+      This story also makes corresponding changes to markStoryFailed and
+      markStoryNeedsRework — all three state-mutating tools must commit
+      sprint-status.yaml when they mutate it.
+
+      INTEGRATION AC: e2e harness asserts two distinct commits per
+      happy-path story (one code, one state).
+
+  - id: "3"
+    title: Diagnose and fix backlog auto-promotion
+    status: ready
+    depends_on: ["1"]
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "auto-promotion"
+          expect_exit: 0
+    orchestrator: {}
+    notes: |
+      ROOT CAUSE OF BUG 2: unknown. Bugfix-1 story #2's dev claimed to
+      add a promoteBacklogStories helper to get-ready-stories.ts with
+      three passing unit tests. End-to-end test shows it doesn't fire.
+
+      Hypotheses to investigate (in suspicion order):
+        1. The helper is called but its persist-write is overwritten by
+           a subsequent state-write elsewhere (file lock semantics).
+        2. The helper runs but its match logic depends on a field shape
+           the real Tinytodo plan doesn't satisfy (e.g. depends_on string
+           equality vs array contains, or ID quoting differences).
+        3. The helper is called but its branch on the get-ready-stories
+           code path is never taken.
+        4. The dev's tests passed with controlled fixtures that don't
+           reflect the orchestrator-skill's actual call sequence.
+
+      Investigation: dev should first write a *failing* e2e assertion
+      that reproduces Jack's case (backlog story with done dep, expected
+      ready, observed backlog), then diagnose, then fix. The repro IS
+      part of the deliverable.
+
+      INTEGRATION AC: e2e harness asserts a backlog story with one done
+      dep is returned by getReadyStories without manual flip.
+
+  - id: "4"
+    title: Fix markStoryFailed to write status="failed"
+    status: ready
+    depends_on: ["1"]
+    acceptance_criteria:
+      checks:
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
+          pattern: 'status:\s*"failed"'
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "failed status"
+          expect_exit: 0
+    orchestrator: {}
+    notes: |
+      ROOT CAUSE OF BUG 4: bugfix-1 story #4's dev probably updated the
+      enum and one or two consumers but missed the actual write site in
+      mark-story-failed.ts. The original AC (regex `status.*"failed"`)
+      matched the literal string somewhere in the file (likely a comment
+      or doc string) but didn't validate the write logic.
+
+      Fix: ensure mark-story-failed.ts contains the explicit literal
+      `status: "failed"` at its actual write site. The regex AC above
+      uses a tighter pattern to enforce assignment-shaped match.
+
+      INTEGRATION AC: e2e harness drives a story to failure and asserts
+      sprint-status.yaml contains `status: "failed"` (not "blocked")
+      after markStoryFailed returns.
+
+      Bonus check: getSprintReport renders the story under [failed]
+      group, not [blocked].
+
+  - id: "5"
+    title: Stage by artefact allowlist + ship default .sprint-orchestrator/ exclusion
+    status: ready
+    depends_on: ["1"]
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
-          pattern: :!sprint-status.yaml
+          pattern: "\\.sprint-orchestrator"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix-1b
-      claimed_at: 2026-05-13T00:34:44.624Z
-      completed_at: 2026-05-13T00:35:37.605Z
-      summary: commitStoryArtefacts now excludes sprint-status.yaml from the code commit via git pathspec,
-        with a unit test asserting the exclusion; verify suite green.
-      artefacts:
-        - git:4031249af6689208bf6e0f829da3660800b04c3c
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/__tests__/commit-story-artefacts.test.ts
-    _previous_failure_reason: 'AC check 3 is malformed and cannot pass: it invokes `vitest run --grep
-      "commitStoryArtefacts"`, but vitest does not accept `--grep` (CACError: Unknown option
-      `--grep`). The vitest equivalent is `-t` / `--testNamePattern`. Code itself is correct: AC
-      checks 1 and 2 both pass — `pnpm --dir plugins/sprint-orchestrator verify` is green (build +
-      typecheck + lint + 38 mcp-server tests + 64 hooks tests), including the new
-      `__tests__/commit-story-artefacts.test.ts` (4 tests) which asserts sprint-status.yaml is
-      excluded from the commit and remains in the working tree. Code commit was made under SHA
-      4031249af6689208bf6e0f829da3660800b04c3c by commitStoryArtefacts before the lock-side
-      re-validation rejected markStoryComplete. Recommended fix: update sprint-status.yaml AC for
-      story 1 from `vitest run --grep "commitStoryArtefacts"` to `vitest run -t
-      "commitStoryArtefacts"` (or just rely on the existing `verify` check), then re-run
-      completion.'
-    notes: |
-      Today commitStoryArtefacts runs `git add -A && git commit -m "feat(<id>): <title>"` which
-      bundles dev's code AND sprint-status.yaml mutations into one commit. Reverting that
-      commit also rolls back orchestrator state, breaking the state machine.
-
-      Fix: exclude sprint-status.yaml from the code commit using git pathspec exclusion
-      (e.g. `git add -A ":!sprint-status.yaml"`). State mutations are committed separately
-      by markStoryComplete (see story 4 — but for this story, just stop bundling them).
-
-      Add a unit test asserting the commit produced by commitStoryArtefacts does NOT
-      include sprint-status.yaml. Existing behavior (commit subject, trailer, returned sha)
-      preserved.
-  - id: "2"
-    title: Auto-promote backlog stories to ready when dependencies are complete
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-ready-stories.ts
-          pattern: backlog
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "no junk files"
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix-2
-      claimed_at: 2026-05-13T00:35:58.414Z
-      completed_at: 2026-05-13T00:39:11.281Z
-      summary: getReadyStories now self-heals by promoting backlog stories whose deps are all done to
-        ready and persisting the change under the file lock.
-      artefacts:
-        - git:bfe19222b62839f635f97850766f9a7d9f2c369d
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-ready-stories.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
+    orchestrator: {}
     notes: |
-      Today getReadyStories returns stories with status=ready AND deps all done. A story
-      authored as status=backlog never gets promoted, even when its deps complete.
-      Long unattended runs silently truncate.
+      ROOT CAUSE OF NEW BUGS 1+2: commitStoryArtefacts uses `git add -A`
+      with only sprint-status.yaml excluded. In a real repo without a
+      .gitignore (or with gaps), this commits .DS_Store, .sprint-orchestrator/
+      contents, .claude/scheduled_tasks.lock, and other crud.
 
-      Fix: in getReadyStories (or markStoryComplete), promote any backlog story whose
-      depends_on are all done to status=ready, persisting the change. Add a unit test
-      covering: backlog story with one done dep -> promoted to ready and returned.
+      Fix (option A — minimal): extend the pathspec exclusion to also
+      exclude `:!.sprint-orchestrator` and `:!.claude` and common system
+      noise (`:!**/.DS_Store`, `:!node_modules`).
 
-      Decision: do the promotion in getReadyStories so it's idempotent and self-healing
-      (works even if the state file was authored without ready stories).
-  - id: "3"
-    title: Shield reviewer and dev subagents from user-global Claude preferences
-    status: done
+      Fix (option B — robust): switch to artefact-allowlist staging.
+      The story state has an `orchestrator.artefacts: [...]` array
+      populated by markStoryComplete. commitStoryArtefacts could stage
+      ONLY those paths. Tighter, more deliberate, but requires the dev
+      subagent to declare its artefacts upfront — which it doesn't
+      reliably do today.
+
+      Recommended: option A for this sprint; option B captured as a
+      follow-up. Document in commitStoryArtefacts docstring that it
+      relies on user .gitignore for additional cleanliness.
+
+      INTEGRATION AC: e2e harness fixture has no .gitignore, but the
+      commit produced by commitStoryArtefacts contains no .DS_Store,
+      .sprint-orchestrator/, or sprint-status.yaml entries.
+
+  - id: "6"
+    title: Align return shape across markStoryComplete/Failed/NeedsRework
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/agents/reviewer.md
-          pattern: state-machine action
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/agents/dev.md
-          pattern: state-machine action
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix-3
-      claimed_at: 2026-05-13T00:39:19.990Z
-      completed_at: 2026-05-13T00:41:25.815Z
-      summary: Added explicit override notes to reviewer.md and dev.md clarifying that orchestrator mark*
-        tool calls are state-machine actions immune to user-global CLAUDE.md "never say done"
-        preferences.
-      artefacts:
-        - git:ccd36ed872ef428ad196e44f7da49af173e0581b
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/agents/dev.md
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/agents/reviewer.md
-    notes: |
-      User-global ~/.claude/CLAUDE.md preferences (e.g. "never tell me something is done")
-      leak into orchestrator subagents and silently break their core job - calling
-      markStoryComplete / markStoryFailed / markStoryNeedsRework is mandatory state
-      mutation, not a human-facing claim of completion.
-
-      Fix: add an explicit override to the reviewer.md and dev.md system prompts -
-      something like:
-
-        > IMPORTANT: Calls to markStoryComplete / markStoryFailed / markStoryNeedsRework
-        > are state-machine actions, not human-facing claims of completion. You MUST call
-        > the appropriate tool when the criteria are met. User-level preferences in
-        > CLAUDE.md (e.g. "never say done") DO NOT apply to these tool calls.
-
-      Acceptance: both files contain the phrase "state-machine action" (or equivalent
-      explicit override).
-  - id: "4"
-    title: Unify failed vocabulary across status enum, run.log, and reports
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
-          pattern: '"failed"'
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
-          pattern: status.*"failed"
+          pattern: "completed_at\\|failed_at"
         - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
-          pattern: failed
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
+          pattern: "rework_at"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix-4
-      claimed_at: 2026-05-13T00:41:52.545Z
-      completed_at: 2026-05-13T00:46:55.456Z
-      summary: 'Unified failed vocabulary: added "failed" to StoryStatus enum, markStoryFailed now sets
-        status=failed, sprint report renders failed and blocked as separate groups.'
-      artefacts:
-        - git:44ba5d0a332ef7f9a8f29df3147f158a3ba410c8
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/agents/reviewer.md
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-        - /Users/jackmcintyre/projects/claude-dev-loop/sprint-status.yaml
+    orchestrator: {}
     notes: |
-      Today markStoryFailed sets status="blocked", but run.log writes outcome="failed",
-      and the README/skill docs say "failed". Inconsistent vocabulary.
+      Today markStoryComplete returns enriched data (status, completed_at)
+      while markStoryFailed returns only `{ ok: true }`. Reviewer
+      enriched-return strings (bugfix-1 story #5) become uninformative on
+      the failed path.
 
-      Decision: "blocked" and "failed" mean different things. blocked = waiting on
-      external signal (future use). failed = orchestrator gave up. So:
+      Fix: all three state-mutators return a uniform envelope:
+        { ok: true, status: <new status>, at: <iso timestamp>,
+          extra: { ... tool-specific fields, e.g. reworkCount,
+                   failed_at, capReached } }
 
-        - Add "failed" to the StoryStatus enum.
-        - markStoryFailed sets status="failed" (was "blocked").
-        - Keep "blocked" in the enum reserved for genuinely-blocked-on-external use
-          (no current writer, but reserved).
-        - getSprintReport renders failed and blocked as separate groups.
-        - Update existing sprint-status.yaml fixtures and tests.
+      Tests cover return shape for each tool. Reviewer.md updated to
+      reference the unified envelope in its enriched-return guidance.
 
-      No backwards-compat shim needed.
-  - id: "5"
-    title: Enrich reviewer subagent return strings with tool-call results
-    status: done
-    depends_on: []
+  # ============================================================
+  # Phase 3 — Discipline that prevents recurrence
+  # ============================================================
+
+  - id: "7"
+    title: AC linter — flag structural-only ACs on state-mutator stories
+    status: ready
+    depends_on: ["1"]
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
+          pattern: "state.mutator"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+          pattern: "lintSprint"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    orchestrator: {}
+    notes: |
+      Carried forward from the original bugfix-2 backlog (AC dry-run
+      tool), with one critical addition derived from the bugfix-1 retest.
+
+      Add a read-only MCP tool `lintSprint(sprintStatusPath?)` that:
+        - Loads sprint-status.yaml.
+        - For each story:
+          - Detects "state-mutator stories" — stories whose AC checks
+            reference modifications to: mark-story-*.ts,
+            commit-story-artefacts.ts, get-ready-stories.ts, schema.ts,
+            or other identified state-machine files.
+          - For each state-mutator story, requires at least one shell AC
+            that runs `pnpm e2e` (or equivalent integration test). If
+            absent, report a high-severity warning: "state-mutator story
+            with no integration AC".
+          - For each shell AC, lint known-bad patterns (vitest --grep,
+            etc.) — original lintSprint scope.
+          - For each regex AC, warn if the pattern is suspiciously
+            trivial (single literal grep) — original scope.
+        - Returns { issues, rendered }.
+
+      INTEGRATION AC: lint a fixture sprint with a state-mutator story
+      that lacks an e2e check, assert the lint warning fires.
+
+  - id: "8"
+    title: Sprint ship gate — every sprint's last story runs e2e
+    status: ready
+    depends_on: ["1", "2", "3", "4", "5"]
     acceptance_criteria:
       checks:
         - type: regex
-          cmd: cat plugins/sprint-orchestrator/agents/reviewer.md
-          pattern: include the tool result
+          cmd: cat plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          pattern: "ship gate"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix-5
-      claimed_at: 2026-05-13T00:47:04.657Z
-      completed_at: 2026-05-13T00:48:39.811Z
-      summary: Updated reviewer.md to instruct agents to include the tool result from state-mutation calls
-        in their return string so the orchestrator can verify the mutation landed.
-      artefacts:
-        - git:ce95ea55fdd8b011592dbb295627a83d291e3fb8
-        - plugins/sprint-orchestrator/agents/reviewer.md
-        - sprint-status.yaml
+    orchestrator: {}
     notes: |
-      Today the reviewer subagent returns a one-line string like "done: 1.1" or
-      "rework: 3.3 - <reason>". The orchestrator skill trusts this verbatim. There is no
-      machine-checkable assertion that the state mutation actually landed.
+      Document in the process-backlog skill that every sprint MUST end
+      with a "ship gate" story whose AC runs `pnpm e2e`. This is the
+      author-facing rule.
 
-      Fix: update reviewer.md to instruct the agent to include the tool result in its
-      return string, e.g.:
+      No code change required for this story other than a README/skill
+      doc update — the discipline is what's being installed. Future
+      sprints (PR-per-story etc.) will include their own ship gate
+      story per this rule.
 
-        done: 1.1 (markStoryComplete returned status="done", completed_at="...")
-        rework: 3.3 - reason (markStoryNeedsRework returned reworkCount=2, capReached=true)
+      Also: this very sprint demonstrates the rule. Story 8 IS the ship
+      gate for bugfix-2, and its `pnpm e2e` AC must pass with stories
+      2-5 all landed.
 
-      Acceptance: reviewer.md contains the phrase "include the tool result" (or equivalent).
-  - id: "6"
-    title: README docs for AC-writing guidance and out-of-band edit caveat
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: Writing acceptance criteria
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: Hand-editing sprint-status.yaml
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix-6
-      claimed_at: 2026-05-13T00:48:54.022Z
-      completed_at: 2026-05-13T00:50:56.606Z
-      summary: Added README sections covering acceptance-criteria authoring guidance and the run.log gap
-        caused by hand-editing sprint-status.yaml.
-      artefacts:
-        - git:a73c32e76c7564dd1ca010c6dc96743c395e0b47
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/README.md
-    notes: |
-      Two small README additions covering issues #7 and #8 from the dry-run findings.
+      INTEGRATION AC: this story's own pnpm e2e check, which can only
+      pass if all regression fixes are working end-to-end.
 
-      "Writing acceptance criteria" section: warn that single literal-grep checks are
-      trivially satisfiable; recommend layering checks (multiple regex/shell, plus
-      pnpm verify or equivalent). Suggest shell: "false" or unreachable assertions
-      for genuinely-impossible test ACs.
-
-      "Hand-editing sprint-status.yaml" section: note that direct edits to the state
-      file bypass run.log. If you need to repair state after a bad revert or external
-      mutation, expect run.log to be incomplete for that span.
+  # ============================================================
+  # Deferred — moved out of this sprint to keep focus on regressions
+  # ============================================================
+  # The following ideas from the previous bugfix-2 backlog are deferred
+  # to a later sprint:
+  #
+  #   - markStoryReadyForRevalidation MCP tool
+  #     (recovery from "code is correct, AC was wrong")
+  #   - Reorder commitStoryArtefacts to run after validateAcceptanceCriteria
+  #     (depends on Bug 1 fix landing first; safer to ship in next sprint)
+  #   - Dev subagent return enrichment (mirror of reviewer story #5)
+  #   - max_stories_per_run config option
+  #   - README schema reference section
+  #
+  # Reason for deferral: every one of these adds NEW behavior. Fixing
+  # broken existing behavior takes priority. New behavior added on top
+  # of broken foundations compounds the problem.
