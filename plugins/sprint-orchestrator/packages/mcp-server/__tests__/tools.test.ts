@@ -59,6 +59,85 @@ describe("getReadyStories", () => {
     expect(ready.map((s) => s.id)).toEqual(["S2"]);
   });
 
+  it("auto-promotes a backlog story whose deps are all done and persists the change", async () => {
+    const variant = {
+      sprint_id: "promote-fixture",
+      stories: [
+        {
+          id: "D1",
+          title: "done dep",
+          status: "done",
+          depends_on: [],
+          acceptance_criteria: { checks: [] },
+          orchestrator: { completed_at: "2026-05-12T08:00:00Z" },
+        },
+        {
+          id: "B1",
+          title: "backlog with done dep",
+          status: "backlog",
+          depends_on: ["D1"],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+      ],
+    };
+    const { ctx } = await setup(variant as unknown as typeof baseSprint);
+    const ready = await getReadyStories(ctx);
+    expect(ready.map((s) => s.id)).toEqual(["B1"]);
+    // Persisted: a second call sees status=ready on disk too.
+    const state = await getSprintStatus(ctx);
+    expect(state.stories.find((s) => s.id === "B1")!.status).toBe("ready");
+  });
+
+  it("does not promote a backlog story whose deps are not all done", async () => {
+    const variant = {
+      sprint_id: "no-promote",
+      stories: [
+        {
+          id: "R1",
+          title: "ready dep",
+          status: "ready",
+          depends_on: [],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+        {
+          id: "B1",
+          title: "backlog waiting",
+          status: "backlog",
+          depends_on: ["R1"],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+      ],
+    };
+    const { ctx } = await setup(variant as unknown as typeof baseSprint);
+    const ready = await getReadyStories(ctx);
+    expect(ready.map((s) => s.id)).toEqual(["R1"]);
+    const state = await getSprintStatus(ctx);
+    expect(state.stories.find((s) => s.id === "B1")!.status).toBe("backlog");
+  });
+
+  it("does not promote a backlog story whose declared dep does not exist", async () => {
+    const variant = {
+      sprint_id: "ghost-dep",
+      stories: [
+        {
+          id: "B1",
+          title: "backlog with ghost dep",
+          status: "backlog",
+          depends_on: ["ghost"],
+          acceptance_criteria: { checks: [] },
+          orchestrator: {},
+        },
+      ],
+    };
+    const { ctx } = await setup(variant as unknown as typeof baseSprint);
+    expect(await getReadyStories(ctx)).toEqual([]);
+    const state = await getSprintStatus(ctx);
+    expect(state.stories.find((s) => s.id === "B1")!.status).toBe("backlog");
+  });
+
   it("excludes a story whose declared dep does not exist", async () => {
     const variant = {
       ...baseSprint,

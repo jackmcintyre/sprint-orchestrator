@@ -2,7 +2,7 @@ sprint_id: orchestrator-bugfix-sprint-1
 stories:
   - id: "1"
     title: Split state and code commits in commitStoryArtefacts
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -12,13 +12,28 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator/packages/mcp-server test -- --grep
-            "commitStoryArtefacts"
-          expect_exit: 0
     orchestrator:
-      claimed_by: dev-bugfix-1
-      claimed_at: 2026-05-13T00:30:02.985Z
+      claimed_by: dev-bugfix-1b
+      claimed_at: 2026-05-13T00:34:44.624Z
+      completed_at: 2026-05-13T00:35:37.605Z
+      summary: commitStoryArtefacts now excludes sprint-status.yaml from the code commit via git pathspec,
+        with a unit test asserting the exclusion; verify suite green.
+      artefacts:
+        - git:4031249af6689208bf6e0f829da3660800b04c3c
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/__tests__/commit-story-artefacts.test.ts
+    _previous_failure_reason: 'AC check 3 is malformed and cannot pass: it invokes `vitest run --grep
+      "commitStoryArtefacts"`, but vitest does not accept `--grep` (CACError: Unknown option
+      `--grep`). The vitest equivalent is `-t` / `--testNamePattern`. Code itself is correct: AC
+      checks 1 and 2 both pass — `pnpm --dir plugins/sprint-orchestrator verify` is green (build +
+      typecheck + lint + 38 mcp-server tests + 64 hooks tests), including the new
+      `__tests__/commit-story-artefacts.test.ts` (4 tests) which asserts sprint-status.yaml is
+      excluded from the commit and remains in the working tree. Code commit was made under SHA
+      4031249af6689208bf6e0f829da3660800b04c3c by commitStoryArtefacts before the lock-side
+      re-validation rejected markStoryComplete. Recommended fix: update sprint-status.yaml AC for
+      story 1 from `vitest run --grep "commitStoryArtefacts"` to `vitest run -t
+      "commitStoryArtefacts"` (or just rely on the existing `verify` check), then re-run
+      completion.'
     notes: |
       Today commitStoryArtefacts runs `git add -A && git commit -m "feat(<id>): <title>"` which
       bundles dev's code AND sprint-status.yaml mutations into one commit. Reverting that
@@ -33,7 +48,7 @@ stories:
       preserved.
   - id: "2"
     title: Auto-promote backlog stories to ready when dependencies are complete
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -43,10 +58,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator/packages/mcp-server test -- --grep "promote"
-          expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix-2
+      claimed_at: 2026-05-13T00:35:58.414Z
     notes: |
       Today getReadyStories returns stories with status=ready AND deps all done. A story
       authored as status=backlog never gets promoted, even when its deps complete.
