@@ -13,8 +13,8 @@ stories:
     orchestrator:
       claimed_by: dev-loop-20260513
       claimed_at: 2026-05-13T04:46:35.348Z
-      rework_count: 0
       last_failure_reason: "Acceptance criteria failed: shell"
+      rework_count: 0
       failed_at: 2026-05-13T04:46:53.888Z
     notes: |
       PROBLEM: When invoked on a feature branch whose `default_base`
@@ -107,7 +107,7 @@ stories:
           (add orchestrator.base_branch field)
   - id: "3"
     title: Investigate and fix stray cross-session state-persist commits
-    status: ready
+    status: failed
     depends_on: []
     acceptance_criteria:
       checks:
@@ -116,7 +116,11 @@ stories:
             tool call in the current session"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-loop-20260513-s3
+      claimed_at: 2026-05-13T04:52:19.970Z
       rework_count: 0
+      last_failure_reason: "Acceptance criteria failed: shell"
+      failed_at: 2026-05-13T04:52:24.176Z
     notes: |
       PROBLEM: between two test sessions on the same branch
       (retest-pps-1.1), a commit `chore(sprint): persist 1.1 failure`
