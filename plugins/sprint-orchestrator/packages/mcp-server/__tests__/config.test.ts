@@ -42,7 +42,7 @@ describe("getOrInitConfig", () => {
     expect(r.setupQuestions?.length ?? 0).toBeGreaterThan(0);
   });
 
-  it('defaults pr_per_story=true and default_base="main" when omitted', async () => {
+  it('defaults pr_per_story=false and default_base="main" when omitted', async () => {
     const { ctx } = await setup();
     await fs.mkdir(path.dirname(ctx.configPath), { recursive: true });
     await fs.writeFile(
@@ -55,7 +55,7 @@ describe("getOrInitConfig", () => {
       "utf8",
     );
     const r = await getOrInitConfig(ctx);
-    expect(r.config?.pr_per_story).toBe(true);
+    expect(r.config?.pr_per_story).toBe(false);
     expect(r.config?.default_base).toBe("main");
   });
 
@@ -92,7 +92,7 @@ describe("getOrInitConfig", () => {
     );
     const r = await getOrInitConfig(ctx);
     expect(r.config?.default_base).toBe("develop");
-    expect(r.config?.pr_per_story).toBe(true);
+    expect(r.config?.pr_per_story).toBe(false);
   });
 
   it("reads an existing config in preference to auto-detect", async () => {

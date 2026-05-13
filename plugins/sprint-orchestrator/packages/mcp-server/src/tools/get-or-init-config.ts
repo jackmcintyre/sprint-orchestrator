@@ -24,12 +24,10 @@ export interface OrchestratorConfig {
    */
   force_release_stale?: number;
   /**
-   * If true, the orchestrator workflow opens one PR per story (the new
-   * default). Set to `false` to opt out and use the legacy shared-branch
-   * mode. Defaults to `true` when omitted.
-   *
-   * NOTE: This field is currently passive — it is parsed and round-tripped
-   * through the config but no consumer reads it yet. Story 2 wires it in.
+   * If true, the orchestrator creates a per-story branch before the dev
+   * subagent commits. Defaults to `false` while the per-story workflow is
+   * incomplete — push, PR creation, and dependency-aware branch rooting
+   * land in later slices. Opt in explicitly to test the in-flight slices.
    */
   pr_per_story?: boolean;
   /**
@@ -43,7 +41,7 @@ export interface OrchestratorConfig {
 }
 
 /** Defaults applied when a config omits the new pr-per-story fields. */
-const DEFAULT_PR_PER_STORY = true;
+const DEFAULT_PR_PER_STORY = false;
 const DEFAULT_BASE_BRANCH = "main";
 
 function withPrPerStoryDefaults(config: OrchestratorConfig): OrchestratorConfig {

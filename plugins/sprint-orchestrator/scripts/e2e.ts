@@ -285,6 +285,22 @@ async function readLog(root: string): Promise<Array<Record<string, unknown>>> {
 async function buildAssertions(root: string): Promise<Assertion[]> {
   const ctx = makeContext(root);
 
+  // Opt the primary run into per-story branches. The default is `false`
+  // while the workflow is still incomplete; the per-story branch assertion
+  // below depends on the flag being on, so we write an explicit config.
+  await fs.mkdir(path.dirname(ctx.configPath), { recursive: true });
+  await fs.writeFile(
+    ctx.configPath,
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "layout: custom",
+      "autoDetected: false",
+      "pr_per_story: true",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
   // Drive the full flow once, capture artifacts, then run assertions.
   // A needs a real code change so the "two commits" assertion is meaningful;
   // its fixture AC just checks src/hello.txt exists, but commitStoryArtefacts
@@ -448,8 +464,9 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
     {
       name: "branch-per-story: story A's commits land on its own branch when flag is on",
       run: () => {
-        // pr_per_story defaults to true, so prepareStoryBranch should have
-        // checked out a per-story branch named `<id-slug>-<title-slug>`.
+        // The primary run writes pr_per_story: true into config above, so
+        // prepareStoryBranch should have checked out a per-story branch
+        // named `<id-slug>-<title-slug>`.
         const expectedBranch = "a-happy-path-story";
         expect(
           happy.preparedBranch === expectedBranch,
