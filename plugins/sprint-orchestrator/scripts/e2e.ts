@@ -463,6 +463,64 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
       },
     },
     {
+      name: "branch-per-story: dependent story's branch is rooted at the dependency's branch tip",
+      run: () => {
+        // Story B depends on A. With pr_per_story=true and A already done on
+        // its own per-story branch, prepareStoryBranch must root B from A's
+        // branch tip (not from main), so the dev subagent on B can see A's
+        // commits via plain `git log`.
+        expect(!!bDriven, "story B was not driven; auto-promotion path likely broke");
+        const aBranch = "a-happy-path-story";
+        const bBranch = "b-backlog-story-that-should-auto-promote-w";
+        expect(
+          bDriven!.preparedBranch === bBranch,
+          `expected preparedBranch=${bBranch}, got ${String(bDriven!.preparedBranch)}`,
+        );
+        // A's commits must be reachable from B's branch (i.e. B was rooted
+        // from A's tip, not from main).
+        const aShas = git(ctx.projectRoot, ["rev-list", aBranch])
+          .stdout.trim()
+          .split("\n")
+          .filter(Boolean);
+        const bShas = git(ctx.projectRoot, ["rev-list", bBranch])
+          .stdout.trim()
+          .split("\n")
+          .filter(Boolean);
+        for (const sha of aShas) {
+          expect(
+            bShas.includes(sha),
+            `A's commit ${sha} not reachable from ${bBranch} — B is not rooted at A's tip`,
+          );
+        }
+        // B's first new commit's parent must be reachable from A's tip.
+        const bNewShas = bDriven!.shasAfter.filter((s) => !bDriven!.shasBefore.includes(s));
+        expect(bNewShas.length > 0, "no new commits found for story B");
+        // The oldest of B's new commits is at the end of bNewShas (rev-list
+        // is newest-first). Walk to the first commit on B that is NOT an
+        // A-reachable commit; its parent must be A's tip.
+        const oldestBNew = bNewShas[bNewShas.length - 1]!;
+        const parentSha = git(ctx.projectRoot, ["rev-parse", `${oldestBNew}^`]).stdout.trim();
+        expect(
+          aShas.includes(parentSha),
+          `B's first commit ${oldestBNew} has parent ${parentSha} which is not reachable from ${aBranch}`,
+        );
+        // State should record the chosen base.
+        expect(
+          (storyB!.orchestrator as Record<string, unknown>).base_branch === aBranch,
+          `story B orchestrator.base_branch=${String(
+            (storyB!.orchestrator as Record<string, unknown>).base_branch,
+          )} (expected ${aBranch})`,
+        );
+        expect(
+          (storyB!.orchestrator as Record<string, unknown>).base_branch_fallback_reason ===
+            undefined,
+          `unexpected base_branch_fallback_reason=${String(
+            (storyB!.orchestrator as Record<string, unknown>).base_branch_fallback_reason,
+          )}`,
+        );
+      },
+    },
+    {
       name: "branch-per-story: story A's commits land on its own branch when flag is on",
       run: () => {
         // The primary run writes pr_per_story: true into config above, so

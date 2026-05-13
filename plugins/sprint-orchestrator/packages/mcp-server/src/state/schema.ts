@@ -39,6 +39,21 @@ export const OrchestratorMeta = z
     rework_count: z.number().int().nonnegative().default(0),
     last_review_feedback: z.string().optional(),
     last_review_at: z.string().datetime({ offset: true }).optional(),
+    /**
+     * Branch ref this story's per-story branch was rooted from. Populated by
+     * `prepareStoryBranch` whenever it creates a branch — usually
+     * `default_base`, but when the story's `depends_on` includes already-done
+     * stories with their own per-story branches still on disk, this records
+     * the predecessor's branch tip we rooted from instead.
+     */
+    base_branch: z.string().optional(),
+    /**
+     * Reason `prepareStoryBranch` fell back to `default_base` instead of
+     * rooting from a dependency's branch tip. Only set when `depends_on` was
+     * non-empty AND we could not chain (e.g. a dep lacks `orchestrator.branch`,
+     * or its branch no longer exists locally).
+     */
+    base_branch_fallback_reason: z.string().optional(),
   })
   .passthrough()
   .default({});
