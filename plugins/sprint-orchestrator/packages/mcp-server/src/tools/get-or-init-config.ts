@@ -49,6 +49,19 @@ export interface OrchestratorConfig {
    * alongside other tuning knobs.
    */
   turn_cap_per_story?: number;
+  /**
+   * Optional per-role model overrides applied at spawn time. When a
+   * role's entry is set, `resolveSpawnModel` returns that model ID for
+   * the role instead of reading the agent file's `model:` frontmatter
+   * or falling back to `DEFAULT_*_MODEL`. Story 1 of model-tiering-v1
+   * introduces this block; later stories may extend it.
+   */
+  models?: {
+    /** Override for the dev subagent. Omit to keep the frontmatter default. */
+    dev?: string;
+    /** Override for the reviewer subagent. Omit to keep the frontmatter default. */
+    reviewer?: string;
+  };
 }
 
 /** Defaults applied when a config omits the new pr-per-story fields. */

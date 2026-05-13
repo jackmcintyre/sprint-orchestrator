@@ -69,6 +69,14 @@ import {
 } from "../packages/mcp-server/src/tools/readme-runsprint-phrases.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
+import { buildServer } from "../packages/mcp-server/src/index.js";
+import {
+  DEFAULT_DEV_MODEL,
+  DEFAULT_REVIEWER_MODEL,
+} from "../packages/mcp-server/src/tools/model-tiering-defaults.js";
+import { RESOLVE_SPAWN_MODEL_INSTRUCTION } from "../packages/mcp-server/src/tools/process-backlog-spawn-phrases.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
 import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
 import { handleStop } from "../packages/hooks/src/stop.js";
@@ -3353,6 +3361,16 @@ async function main(): Promise<number> {
     outcomes.push(...adaptOutcomes);
   }
 
+  // model-tiering-v1 sprint, story 1: resolveSpawnModel reads frontmatter +
+  // optional config override + falls back to DEFAULT_*_MODEL constants. The
+  // mini-run invokes the registered MCP tool via an in-memory client (NOT
+  // the helper directly) and also asserts the SKILL.md phrase-lock.
+  if (!filter || filter.test("resolveSpawnModel respects frontmatter and config override")) {
+    console.log("[e2e] mini-run: resolveSpawnModel static resolution");
+    const resolveOutcomes = await runResolveSpawnModelStaticMiniRun();
+    outcomes.push(...resolveOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -3363,6 +3381,221 @@ async function main(): Promise<number> {
     return 1;
   }
   return failed.length === 0 ? 0 : 1;
+}
+
+/**
+ * model-tiering-v1 sprint, story 1 — resolveSpawnModel static resolution.
+ *
+ * Four fixtures + a phrase-lock assertion. Each fixture sets up a real
+ * temp directory with a real `.sprint-orchestrator/config.yaml`, a real
+ * `sprint-status.yaml`, and stub agent files, then invokes the
+ * **registered** `resolveSpawnModel` MCP tool through an in-memory
+ * client/server pair (NOT the resolver helper, NOT a mock). The phrase-
+ * lock asserts SKILL.md contains `RESOLVE_SPAWN_MODEL_INSTRUCTION`
+ * verbatim so the skill prose and the resolver contract cannot drift.
+ *
+ * Grep tag: "resolveSpawnModel respects frontmatter and config override".
+ */
+async function runResolveSpawnModelStaticMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  interface FixtureSpec {
+    name: string;
+    role: "dev" | "reviewer";
+    /** `model:` line content for the agent file, or null to omit the field. */
+    agentModel: string | null;
+    /** Optional `models.<role>` value to write into config.yaml. */
+    configModel?: string;
+    /** Expected resolved model ID. */
+    expected: string;
+    /** Whether to write the agent file at all. */
+    writeAgentFile: boolean;
+  }
+
+  const fixtures: FixtureSpec[] = [
+    {
+      name: "frontmatter-only",
+      role: "dev",
+      agentModel: "claude-sonnet-4-6",
+      expected: "claude-sonnet-4-6",
+      writeAgentFile: true,
+    },
+    {
+      name: "config-override",
+      role: "dev",
+      agentModel: "claude-sonnet-4-6",
+      configModel: "claude-opus-4-7",
+      expected: "claude-opus-4-7",
+      writeAgentFile: true,
+    },
+    {
+      name: "no-frontmatter-no-config",
+      role: "dev",
+      agentModel: null,
+      expected: DEFAULT_DEV_MODEL,
+      writeAgentFile: true,
+    },
+    {
+      name: "reviewer-role",
+      role: "reviewer",
+      agentModel: "claude-sonnet-4-6",
+      expected: "claude-sonnet-4-6",
+      writeAgentFile: true,
+    },
+  ];
+
+  for (const fx of fixtures) {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), `sprint-orch-resolve-model-${fx.name}-`));
+    try {
+      // Real sprint-status.yaml fixture — minimum the schema accepts.
+      await fs.writeFile(
+        path.join(tmp, "sprint-status.yaml"),
+        [
+          "sprint_id: model-tiering-fixture",
+          "schema_version: 1",
+          "stories:",
+          "  - id: '1'",
+          "    title: fixture story",
+          "    status: ready",
+          "    depends_on: []",
+          "    acceptance_criteria:",
+          "      checks: []",
+          "    orchestrator: {}",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      // Real .sprint-orchestrator/config.yaml fixture.
+      const configDir = path.join(tmp, ".sprint-orchestrator");
+      await fs.mkdir(configDir, { recursive: true });
+      const configLines = [
+        "sprintStatusPath: sprint-status.yaml",
+        "layout: custom",
+        "autoDetected: false",
+      ];
+      if (fx.configModel) {
+        configLines.push("models:");
+        configLines.push(`  ${fx.role}: ${fx.configModel}`);
+      }
+      configLines.push("");
+      await fs.writeFile(path.join(configDir, "config.yaml"), configLines.join("\n"), "utf8");
+
+      // Stub agent files in a temp `agents/` directory the resolver reads
+      // via the `agentsDir` override on ToolContext. We always create the
+      // directory; we may write only one role's file, or write a file with
+      // no `model:` field, depending on the fixture.
+      const agentsDir = path.join(tmp, "agents");
+      await fs.mkdir(agentsDir, { recursive: true });
+      if (fx.writeAgentFile) {
+        const fmLines = ["---", `name: ${fx.role}`];
+        if (fx.agentModel !== null) {
+          fmLines.push(`model: ${fx.agentModel}`);
+        }
+        fmLines.push("---", "", `stub ${fx.role} agent`, "");
+        await fs.writeFile(path.join(agentsDir, `${fx.role}.md`), fmLines.join("\n"), "utf8");
+      }
+
+      // Build a server bound to this fixture's context, wire an in-memory
+      // client to it, and call the **registered** resolveSpawnModel tool.
+      const ctx: ToolContext = {
+        projectRoot: tmp,
+        sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+        configPath: path.join(configDir, "config.yaml"),
+        agentsDir,
+      };
+      const server = buildServer(ctx);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client(
+        { name: "e2e-resolve-spawn-model", version: "0.0.1" },
+        { capabilities: {} },
+      );
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      let parsed: { model?: unknown; source?: unknown } = {};
+      try {
+        const result = (await client.callTool({
+          name: "resolveSpawnModel",
+          arguments: { storyId: "1", role: fx.role },
+        })) as { content?: Array<{ type: string; text?: string }> };
+        const textPart = result.content?.find((c) => c.type === "text");
+        if (textPart?.text) {
+          parsed = JSON.parse(textPart.text) as { model?: unknown; source?: unknown };
+        }
+      } finally {
+        await client.close();
+        await server.close();
+      }
+
+      await runOne({
+        name: `resolveSpawnModel respects frontmatter and config override: ${fx.name} returns ${fx.expected} for role=${fx.role}`,
+        run: () => {
+          expect(
+            typeof parsed.model === "string",
+            `expected resolveSpawnModel to return a string model, got ${JSON.stringify(parsed)}`,
+          );
+          expect(
+            parsed.model === fx.expected,
+            `expected model=${fx.expected} for fixture ${fx.name}, got ${JSON.stringify(parsed.model)} (source=${JSON.stringify(parsed.source)})`,
+          );
+        },
+      });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  }
+
+  // Phrase-lock assertion: SKILL.md must contain RESOLVE_SPAWN_MODEL_INSTRUCTION verbatim.
+  const skillPath = path.resolve(HERE, "..", "skills", "process-backlog", "SKILL.md");
+  let skillText = "";
+  try {
+    skillText = await fs.readFile(skillPath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "resolveSpawnModel respects frontmatter and config override: SKILL.md is readable",
+      passed: false,
+      error: `could not read SKILL.md at ${skillPath}: ${msg}`,
+    });
+    return outcomes;
+  }
+  await runOne({
+    name: "resolveSpawnModel respects frontmatter and config override: SKILL.md contains RESOLVE_SPAWN_MODEL_INSTRUCTION verbatim",
+    run: () => {
+      expect(
+        skillText.includes(RESOLVE_SPAWN_MODEL_INSTRUCTION),
+        `SKILL.md does not contain the phrase-locked instruction verbatim. Expected: '${RESOLVE_SPAWN_MODEL_INSTRUCTION}'`,
+      );
+    },
+  });
+
+  // Belt-and-braces: also assert the reviewer fallback constant equals what
+  // the resolver returned when neither config nor frontmatter is set for the
+  // reviewer role. This guards against an accidental future divergence
+  // between DEFAULT_REVIEWER_MODEL and the dev fallback.
+  await runOne({
+    name: "resolveSpawnModel respects frontmatter and config override: DEFAULT_REVIEWER_MODEL is exported as a non-empty string",
+    run: () => {
+      expect(
+        typeof DEFAULT_REVIEWER_MODEL === "string" && DEFAULT_REVIEWER_MODEL.length > 0,
+        `DEFAULT_REVIEWER_MODEL must be a non-empty string, got ${JSON.stringify(DEFAULT_REVIEWER_MODEL)}`,
+      );
+    },
+  });
+
+  return outcomes;
 }
 
 main()

@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: Reviews a completed sprint story against its acceptance criteria, commits the resulting changes, and flips the story state to done or failed via the orchestrator's MCP tools.
+model: claude-sonnet-4-6
 allowed-tools:
   - "Read"
   - "Bash"

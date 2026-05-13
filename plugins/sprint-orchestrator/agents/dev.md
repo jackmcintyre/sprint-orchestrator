@@ -1,6 +1,7 @@
 ---
 name: dev
 description: Implements a single sprint story. Reads context via the orchestrator's MCP tools and edits the project. Never marks a story complete or failed — that's the reviewer's job.
+model: claude-sonnet-4-6
 allowed-tools:
   - "Read"
   - "Write"

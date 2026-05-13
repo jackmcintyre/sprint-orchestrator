@@ -7,6 +7,13 @@ export interface ToolContext {
   sprintStatusPath: string;
   /** Absolute path to .sprint-orchestrator/config.yaml. */
   configPath: string;
+  /**
+   * Override for the directory the resolver reads agent files (dev.md,
+   * reviewer.md) from. Only set by the e2e harness; in normal runs the
+   * resolver derives the plugin-local agents/ directory from
+   * `import.meta.url`. See `resolve-spawn-model.ts`.
+   */
+  agentsDir?: string;
 }
 
 export function defaultContext(projectRoot: string = process.cwd()): ToolContext {
