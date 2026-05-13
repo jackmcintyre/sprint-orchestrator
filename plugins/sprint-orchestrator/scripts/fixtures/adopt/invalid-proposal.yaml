@@ -1,0 +1,12 @@
+schema_version: 1
+sprint_id: "adopt-mini-run-invalid"
+stories:
+  - id: "X1"
+    title: "story with invalid status value"
+    status: not_a_real_status
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: src/x1.txt
+    orchestrator: {}

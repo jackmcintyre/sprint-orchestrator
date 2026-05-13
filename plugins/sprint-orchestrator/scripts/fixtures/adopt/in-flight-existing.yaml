@@ -1,0 +1,25 @@
+schema_version: 1
+sprint_id: "adopt-mini-run-in-flight"
+stories:
+  - id: "INFLIGHT1"
+    title: "story currently in progress"
+    status: in_progress
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: src/in-flight.txt
+    orchestrator:
+      claimed_by: "dev-fixture"
+      claimed_at: "2026-01-01T00:00:00.000Z"
+      rework_count: 0
+  - id: "INFLIGHT2"
+    title: "another ready story"
+    status: ready
+    depends_on:
+      - "INFLIGHT1"
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: src/in-flight-2.txt
+    orchestrator: {}
