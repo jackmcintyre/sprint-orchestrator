@@ -32,6 +32,7 @@ import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story
 import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
 import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { validateAndWriteBacklog } from "../packages/mcp-server/src/tools/adopt-write.js";
+import { adaptBmadOutput } from "../packages/mcp-server/src/tools/adapt-bmad.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
 import {
   CLIPBOARD_AUTOCOPY_NOTE_LINE,
@@ -55,6 +56,11 @@ import {
   ONE_WAY_COUPLING_STATEMENT,
   PRODUCER_EXAMPLE_FRAMING,
 } from "../packages/mcp-server/src/tools/readme-adopt-phrases.js";
+import {
+  ADAPT_BMAD_INTRO,
+  VERIFICATION_REQUIREMENT_STATEMENT,
+  VERIFICATION_SECTION_EXAMPLE,
+} from "../packages/mcp-server/src/tools/readme-adapt-bmad-phrases.js";
 import {
   CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT,
   CLIPBOARD_OPT_OUT_INSTRUCTION,
@@ -2660,6 +2666,123 @@ async function runReadmeDocumentsRunSprintLastLineMiniRun(): Promise<AssertionOu
 }
 
 /**
+ * adapt-bmad sprint, story 3 — README documents the adapt-bmad fast
+ * path and the BMad-side Verification section convention.
+ *
+ * The locked phrases live in `readme-adapt-bmad-phrases.ts` and are the
+ * single source of truth — README and assertions cannot drift.
+ */
+async function runReadmeDocumentsAdaptBmadMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const readmePath = path.resolve(HERE, "..", "README.md");
+  let readme = "";
+  try {
+    readme = await fs.readFile(readmePath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "README documents adapt-bmad fast path and verification convention: file readable",
+      passed: false,
+      error: `could not read README at ${readmePath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  // Same scoping rule as the sibling mini-runs: the "Running a sprint"
+  // section runs from its heading to the next top-level heading.
+  function extractRunningSection(text: string): string | null {
+    const m = text.match(/\n##\s+Running a sprint\b[\s\S]*?(?=\n##\s+|\n?$)/);
+    return m ? m[0] : null;
+  }
+
+  const section = extractRunningSection(readme);
+
+  const checks: Assertion[] = [
+    {
+      name: "README documents adapt-bmad fast path and verification convention: running-a-sprint section exists",
+      run: () => {
+        expect(section !== null, "README is missing the '## Running a sprint' section");
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: adapt-bmad intro is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(ADAPT_BMAD_INTRO),
+          `Running-a-sprint section does not contain the adapt-bmad intro verbatim. Expected: '${ADAPT_BMAD_INTRO}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: verification requirement statement is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(VERIFICATION_REQUIREMENT_STATEMENT),
+          `Running-a-sprint section does not contain the verification-requirement statement verbatim. Expected: '${VERIFICATION_REQUIREMENT_STATEMENT}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: verification fenced-shell example is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(VERIFICATION_SECTION_EXAMPLE),
+          `Running-a-sprint section does not contain the verification fenced-shell example verbatim. Expected:\n${VERIFICATION_SECTION_EXAMPLE}`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: section names both adapt-bmad and universal adopt so reader sees the choice",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes("/sprint-orchestrator:adapt-bmad"),
+          "Running-a-sprint section does not reference /sprint-orchestrator:adapt-bmad",
+        );
+        expect(
+          section.includes(ADOPT_COMMAND),
+          `Running-a-sprint section does not reference universal ${ADOPT_COMMAND} alongside adapt-bmad`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: prior sprint content preserved",
+      run: () => {
+        // Guard against accidental deletion of prior sprint content.
+        expect(
+          /ceil\(\s*story_count\s*\*\s*turn_cap_per_story\s*\)/.test(readme),
+          "README no longer documents the cap formula 'ceil(story_count * turn_cap_per_story)' — adapt-bmad edits must not delete prior sprint content",
+        );
+        expect(
+          readme.includes("Sprint drain confirmed:") &&
+            readme.includes("Sprint paused at hard cap:") &&
+            readme.includes("Sprint blocked:"),
+          "README no longer documents all three end-of-run summary prefixes — adapt-bmad edits must not delete prior sprint content",
+        );
+      },
+    },
+  ];
+
+  for (const a of checks) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  return outcomes;
+}
+
+/**
  * Story 1.2 — deterministic e2e coverage for the adopt validate-and-write path.
  *
  * Exercises `validateAndWriteBacklog` directly (the LLM drafting step is an
@@ -2806,6 +2929,181 @@ async function runAdoptValidateAndWriteMiniRun(): Promise<AssertionOutcome[]> {
   } finally {
     await fs.rm(tmpC, { recursive: true, force: true });
   }
+
+  return outcomes;
+}
+
+/**
+ * Mini-run for adapt-bmad story 2: deterministic coverage for the BMad-to-
+ * sprint-status adaptor. Exercises three golden fixtures:
+ *
+ *   - happy/                  → adaptor returns ok=true; emitted YAML parses,
+ *                               passes lintSprint, and matches the BMad input
+ *                               story-for-story (id, title, depends_on,
+ *                               acceptance_criteria.checks).
+ *   - missing-verification/   → adaptor refuses with a reason that names the
+ *                               offending story file (1-2.md). No partial
+ *                               output (helper is pure).
+ *   - malformed/              → adaptor refuses with a reason that names the
+ *                               offending story file (1-1.md) and identifies
+ *                               the malformed-fence nature.
+ *
+ * Grep tag: "adapt-bmad happy path missing-verification refusal malformed refusal".
+ */
+async function runAdaptBmadMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+  const FIXTURE_DIR = path.resolve(HERE, "fixtures", "adapt-bmad");
+  const HAPPY_DIR = path.join(FIXTURE_DIR, "happy");
+  const MISSING_VERIFICATION_DIR = path.join(FIXTURE_DIR, "missing-verification");
+  const MALFORMED_DIR = path.join(FIXTURE_DIR, "malformed");
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  // Variant (a): happy path — adaptor succeeds, output parses, lintSprint
+  // accepts, and the stories match the BMad headings + Verification fences.
+  const tmpA = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-adapt-happy-"));
+  try {
+    const result = await adaptBmadOutput({ bmadOutputDir: HAPPY_DIR });
+    await runOne({
+      name: "adapt-bmad happy path missing-verification refusal malformed refusal: happy path emits a conforming proposal that lintSprint accepts and stories match the BMad input",
+      run: async () => {
+        expect(result.ok === true, `expected ok=true, got ${JSON.stringify(result)}`);
+        if (result.ok !== true) return;
+
+        // The proposalYaml must parse as YAML. We route through writeFile +
+        // readSprintStatus so we exercise the same path the orchestrator
+        // does at rest (rather than importing `yaml` directly into this
+        // script, which the plugin root does not depend on).
+        const destPath = path.join(tmpA, "sprint-status.yaml");
+        await fs.writeFile(destPath, result.proposalYaml, "utf8");
+        const parsed = await readSprintStatus(destPath);
+
+        expect(parsed.stories.length === 2, `expected 2 stories, got ${parsed.stories.length}`);
+
+        const [s1, s2] = parsed.stories;
+        expect(!!s1 && !!s2, "expected both stories to be defined");
+        if (!s1 || !s2) return;
+
+        expect(s1.id === "1", `expected story 1 id="1", got ${JSON.stringify(s1.id)}`);
+        expect(s2.id === "2", `expected story 2 id="2", got ${JSON.stringify(s2.id)}`);
+
+        expect(
+          s1.title === "First valid story",
+          `expected story 1 title to match BMad heading; got ${JSON.stringify(s1.title)}`,
+        );
+        expect(
+          s2.title === "Second valid story",
+          `expected story 2 title to match BMad heading; got ${JSON.stringify(s2.title)}`,
+        );
+
+        expect(
+          Array.isArray(s1.depends_on) && s1.depends_on.length === 0,
+          `expected story 1 depends_on=[], got ${JSON.stringify(s1.depends_on)}`,
+        );
+        expect(
+          Array.isArray(s2.depends_on) && s2.depends_on.length === 1 && s2.depends_on[0] === "1",
+          `expected story 2 depends_on=["1"], got ${JSON.stringify(s2.depends_on)}`,
+        );
+
+        const s1Checks = s1.acceptance_criteria.checks;
+        const s2Checks = s2.acceptance_criteria.checks;
+        expect(s1Checks.length === 1, `expected story 1 to have 1 check, got ${s1Checks.length}`);
+        expect(s2Checks.length === 1, `expected story 2 to have 1 check, got ${s2Checks.length}`);
+
+        const s1Check = s1Checks[0];
+        const s2Check = s2Checks[0];
+        expect(!!s1Check && !!s2Check, "expected both checks to be defined");
+        if (!s1Check || !s2Check) return;
+
+        expect(
+          s1Check.type === "shell" &&
+            s1Check.cmd === "pnpm --dir plugins/sprint-orchestrator test -- story-one",
+          `expected story 1 check to match Verification fence; got ${JSON.stringify(s1Check)}`,
+        );
+        expect(
+          s2Check.type === "shell" &&
+            s2Check.cmd === "pnpm --dir plugins/sprint-orchestrator test -- story-two",
+          `expected story 2 check to match Verification fence; got ${JSON.stringify(s2Check)}`,
+        );
+        expect(
+          s1Check.type === "shell" && s1Check.expect_exit === 0,
+          `expected story 1 expect_exit=0, got ${JSON.stringify(s1Check)}`,
+        );
+        expect(
+          s2Check.type === "shell" && s2Check.expect_exit === 0,
+          `expected story 2 expect_exit=0, got ${JSON.stringify(s2Check)}`,
+        );
+
+        // lintSprint must accept the emitted proposal at rest.
+        const ctx: ToolContext = {
+          projectRoot: tmpA,
+          sprintStatusPath: destPath,
+          configPath: path.join(tmpA, ".sprint-orchestrator", "config.yaml"),
+        };
+        const report = await lintSprint(ctx, { sprintStatusPath: destPath });
+        const errorIssues = report.issues.filter((i) => i.severity === "error");
+        expect(
+          errorIssues.length === 0,
+          `expected no error-severity lint issues; got: ${JSON.stringify(errorIssues)}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmpA, { recursive: true, force: true });
+  }
+
+  // Variant (b): missing Verification — refusal names the offending file.
+  await runOne({
+    name: "adapt-bmad happy path missing-verification refusal malformed refusal: missing Verification section refusal names the offending story file",
+    run: async () => {
+      const result = await adaptBmadOutput({ bmadOutputDir: MISSING_VERIFICATION_DIR });
+      expect(result.ok === false, `expected ok=false, got ${JSON.stringify(result)}`);
+      if (result.ok !== false) return;
+      const offendingPath = path.join(
+        MISSING_VERIFICATION_DIR,
+        "implementation-artifacts",
+        "1-2.md",
+      );
+      expect(
+        result.reason.includes(offendingPath),
+        `expected reason to name the offending story file ${offendingPath}; got: ${result.reason}`,
+      );
+      expect(
+        /Verification/.test(result.reason),
+        `expected reason to mention "Verification"; got: ${result.reason}`,
+      );
+    },
+  });
+
+  // Variant (c): malformed shell fence — refusal names the offending file
+  // and identifies the malformed-fence nature.
+  await runOne({
+    name: "adapt-bmad happy path missing-verification refusal malformed refusal: malformed shell fence refusal names the offending story file and the malformed-fence nature",
+    run: async () => {
+      const result = await adaptBmadOutput({ bmadOutputDir: MALFORMED_DIR });
+      expect(result.ok === false, `expected ok=false, got ${JSON.stringify(result)}`);
+      if (result.ok !== false) return;
+      const offendingPath = path.join(MALFORMED_DIR, "implementation-artifacts", "1-1.md");
+      expect(
+        result.reason.includes(offendingPath),
+        `expected reason to name the offending story file ${offendingPath}; got: ${result.reason}`,
+      );
+      expect(
+        /malformed.*fence|fence.*malformed|unclosed/i.test(result.reason),
+        `expected reason to identify the malformed-fence nature; got: ${result.reason}`,
+      );
+    },
+  });
 
   return outcomes;
 }
@@ -3011,6 +3309,14 @@ async function main(): Promise<number> {
     outcomes.push(...readmeRunSprintOutputOutcomes);
   }
 
+  // adapt-bmad sprint, story 3: README documents the adapt-bmad fast
+  // path and the BMad-side Verification section convention.
+  if (!filter || filter.test("README documents adapt-bmad fast path and verification convention")) {
+    console.log("[e2e] mini-run: README documents adapt-bmad fast path + verification convention");
+    const readmeAdaptBmadOutcomes = await runReadmeDocumentsAdaptBmadMiniRun();
+    outcomes.push(...readmeAdaptBmadOutcomes);
+  }
+
   // Tenth mini-run (story 2): process-backlog end-of-run summary contract.
   // Three distinct final lines (drain / cap-stop / blocked) so the /goal
   // evaluator can disambiguate run outcomes from the transcript.
@@ -3034,6 +3340,17 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: adopt validate-and-write (happy / invalid / in-flight)");
     const adoptOutcomes = await runAdoptValidateAndWriteMiniRun();
     outcomes.push(...adoptOutcomes);
+  }
+
+  // adapt-bmad sprint, story 2: deterministic coverage for the BMad-to-
+  // sprint-status adaptor (happy / missing-Verification / malformed-fence).
+  if (
+    !filter ||
+    filter.test("adapt-bmad happy path missing-verification refusal malformed refusal")
+  ) {
+    console.log("[e2e] mini-run: adapt-bmad (happy / missing-verification / malformed-fence)");
+    const adaptOutcomes = await runAdaptBmadMiniRun();
+    outcomes.push(...adaptOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);

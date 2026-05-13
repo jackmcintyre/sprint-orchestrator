@@ -53,6 +53,20 @@ schema source of truth — any adaptor's output must pass it.
 
 No adaptors ship in this sprint; the pattern is documented for future extension.
 
+#### adapt-bmad — first concrete adaptor
+
+`/sprint-orchestrator:adapt-bmad` is the first concrete adaptor shipped under this pattern: a deterministic, instant fast path for BMad-authored stories. Reach for it when your stories were authored by BMad; reach for universal `/sprint-orchestrator:adopt` for any other source.
+
+The convention is a BMad-side authoring responsibility: every BMad story file must include a `## Verification` section containing at least one fenced `shell` block. When the section is missing or empty, `adapt-bmad` refuses the run with a named error — there is no silent fallback.
+
+A minimal Verification section is a single fenced shell block under the heading. The fenced block looks like this:
+
+```shell
+pnpm --dir plugins/sprint-orchestrator test -- story-one
+```
+
+`adapt-bmad` extracts the fenced shell command(s) into the story's `acceptance_criteria.checks` and writes a conforming `sprint-status.yaml` — the same validate-and-write path universal `/sprint-orchestrator:adopt` uses.
+
 ### Step 2 — Run the sprint
 
 Once `sprint-status.yaml` exists, the recommended entrypoint is the
