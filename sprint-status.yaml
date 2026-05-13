@@ -1,191 +1,150 @@
-sprint_id: adopt-skill
+sprint_id: runsprint-ergonomics
 stories:
   - id: "1"
-    title: /sprint-orchestrator:adopt skill with LLM drafter, user review, validate-and-write helper
-    status: done
+    title: "run-sprint /goal command is single-line, last-line of output, with fresh-context-window guidance, locked in a constants module"
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"run-sprint emits goal on guaranteed last line with fresh-context guidance\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-adopt-1
-      claimed_at: 2026-05-13T11:56:26.663Z
-      completed_at: 2026-05-13T12:00:01.141Z
-      summary: Added /sprint-orchestrator:adopt skill and pure-TS validateAndWriteBacklog helper reusing
-        lintSprint + getOrInitConfig, with in-flight guard and atomic write.
       rework_count: 0
-      artefacts:
-        - git:901e958b9660a35dfdff775a34a22f8c26fb7415
-        - plugins/sprint-orchestrator/skills/adopt/SKILL.md
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/adopt-write.ts
-    notes: >
-      Build the universal source-agnostic adopt skill plus a pure-TS validate-and-write helper.
+    notes: |
+      PROBLEM: today /sprint-orchestrator:run-sprint computes the turn cap and prints the canonical /goal command, but the printed line is buried in surrounding narrative — making it fiddly to select and copy. The Claude Code harness does NOT allow a skill to fire a slash command directly (confirmed by spike via claude-code-guide agent on 2026-05-13). So copy-paste is here to stay; the win is making it trivial.
 
+      DECISION: structure run-sprint's output so the /goal command is (a) on a single line (no soft-wrapping), (b) the literal final line of stdout (nothing trailing it), and (c) preceded by a one-line user-facing note advising paste in a fresh context window. All three locked in a constants module so the e2e and the skill cannot drift.
 
-      Full BMad story spec:
-        _bmad-output/implementation-artifacts/1-1-sprint-orchestrator-adopt-path-drafts-a-backlog-via-llm-subagent-pauses-for-user-review-validates-and-writes.md
+      BEHAVIOUR (locked format — exact strings to be defined as constants in the new module):
+        - Second-to-last line of output: "Paste this in a fresh context window for the cleanest run:" (or equivalent — final wording is the dev's call as long as the constants module and the e2e assertion agree).
+        - Last line of output: the canonical "/goal /sprint-orchestrator:process-backlog UNTIL every story in sprint-status.yaml is status=done or status=failed, OR stop after <N> turns" — single line, no wrap.
+        - Absolutely nothing printed AFTER the /goal line. No summary, no trailing whitespace beyond a single \n.
+        - The two locked lines should be separated from any preceding narrative by a blank line so they visually stand out.
 
-      What to build:
-        - New skill: plugins/sprint-orchestrator/skills/adopt/SKILL.md
-            * Argument: <path> (required), --force flag (optional)
-            * Spawns an LLM subagent (clean context) to read the source file and propose a conforming sprint-status.yaml draft
-            * Presents the proposal to the user with a diff-style preview against the existing sprint-status.yaml
-            * Pauses for accept / edit / abort
-            * On accept: calls validateAndWriteBacklog
-            * Producer-agnostic: no mention of BMad, Linear, Notion, etc. in the skill body
-        - New helper: plugins/sprint-orchestrator/packages/mcp-server/src/tools/adopt-write.ts
-            * export validateAndWriteBacklog({ proposalYaml, destPath, existingYaml, force })
-            * Reuses lintSprint from packages/mcp-server/src/tools/lint-sprint.ts (do NOT duplicate schema logic)
-            * Uses getOrInitConfig to resolve sprintStatusPath (do NOT hardcode)
-            * Atomic write: temp file + fs.rename
-            * Refuses if existing sprint-status.yaml has any story with status: in_progress and force is false; the refusal message names the in-flight story id
-            * Returns { ok: true, dest } or { ok: false, reason }
-            * Pure function — directly testable from scripts/e2e.ts (no implicit globals)
+      WHY FRESH-CONTEXT-WINDOW MATTERS:
+        - Normalises copy-paste as a deliberate, beneficial action (not a chore).
+        - A fresh context window gives /goal a clean transcript to evaluate the drain condition against — no prior conversation noise.
 
-      Coupling discipline (NFR1, NFR2):
-        - The orchestrator core (MCP server, state machine, process-backlog skill) MUST NOT import adopt-write.ts or anything from skills/adopt/. Coupling is one-way: adopt depends on lintSprint + getOrInitConfig; neither depends on adopt.
-        - Skill body and helper file MUST NOT name any specific producer (BMad/Linear/Notion/Jira). Producer names live only in README (Story 3).
+      FILES TO TOUCH:
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts (NEW)
+            * Mirrors the format-end-of-run-line.ts and readme-adopt-phrases.ts patterns from prior sprints.
+            * Exports: FRESH_CONTEXT_GUIDANCE_LINE (constant string), formatGoalCommandLine(turnCap: number) (function), buildRunSprintFinalOutput(turnCap: number) (assembles the last-two-lines block).
+        - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
+            * Restructure output so buildRunSprintFinalOutput() is the literal final block printed.
+            * Any prior summary/narrative content moves ABOVE the blank-line separator.
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+            * New mini-run runRunSprintGoalLastLineMiniRun() behind grep tag "run-sprint emits goal on guaranteed last line with fresh-context guidance".
+            * Imports planRunSprint() (existing module from the goal-adoption sprint) and the new buildRunSprintFinalOutput().
+            * Asserts: (a) buildRunSprintFinalOutput(N) ends with the canonical /goal line for N, (b) the /goal line contains no embedded newlines, (c) the second-to-last non-empty line is the fresh-context guidance string, (d) nothing follows the /goal line except at most one trailing newline.
 
-      AC verification:
-        - pnpm --dir plugins/sprint-orchestrator verify must pass (build + typecheck + lint + unit tests).
-        - Behavioral correctness is verified by Story 2's deterministic e2e mini-run; Story 1's AC is the compile/lint gate only.
+      EXISTING SURFACES TO REUSE:
+        - planRunSprint() at plugins/sprint-orchestrator/packages/mcp-server/src/tools/plan-run-sprint.ts already computes the turn cap and produces the /goal command string. Wrap or extend; do not duplicate.
+
+      OUT OF SCOPE:
+        - OSC 52 clipboard auto-copy is Story 2. Do not implement here.
+        - Any README rewording is Story 3. Do not edit README.md here.
+
   - id: "2"
-    title: Deterministic e2e coverage for adopt — validation refusal, in-flight refusal, golden-fixture
-      happy path
-    status: done
-    depends_on:
-      - "1"
+    title: "Spike + implement OSC 52 clipboard auto-copy for the /goal command (with env-var opt-out)"
+    status: ready
+    depends_on: ["1"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "adopt validation refusal in-flight refusal
-            golden-fixture happy path"
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"run-sprint emits OSC 52 clipboard sequence for goal command with opt-out\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-adopt-2
-      claimed_at: 2026-05-13T12:00:11.387Z
-      completed_at: 2026-05-13T12:04:12.067Z
-      summary: Added deterministic e2e mini-run for adopt validateAndWriteBacklog covering happy path,
-        invalid-proposal refusal, and in-flight refusal with byte-for-byte dest assertions.
       rework_count: 0
-      artefacts:
-        - git:c5ff97fe4c92e8d90adfbbce6e5437333c5809c0
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-        - plugins/sprint-orchestrator/scripts/fixtures/
-    notes: >
-      Add a deterministic e2e mini-run for the adopt helper. The LLM drafting step is NOT covered by
-      this story (explicit non-goal — testing live LLM output makes assertions flaky).
+    notes: |
+      PROBLEM: even with Story 1's last-line guarantee, the user still has to select and copy. OSC 52 is a terminal escape that loads a string directly into the system clipboard — supported by iTerm2, Kitty, WezTerm, modern Windows Terminal, Alacritty, and others. If the Claude Code harness passes escape codes through to the user's terminal, we can copy the /goal command into the clipboard automatically — user just pastes.
 
+      RISK: we are not 100% sure Claude Code passes terminal escapes through verbatim. This story starts with a spike. If the spike fails, the implementation is dropped to follow-ups.md and the story closes as "spike-failed — limitation documented" (not "failed").
 
-      Full BMad story spec:
-        _bmad-output/implementation-artifacts/1-2-deterministic-e2e-coverage-for-adopt-validation-refusal-in-flight-refusal-golden-fixture-happy-path.md
+      TASK 1 — Spike (must complete before any implementation):
+        - Construct a minimal test: print an OSC 52 escape sequence (\x1b]52;c;<base64>\x07) from a temporary skill or test harness invocation, with a known unique sentinel string in the clipboard payload.
+        - Verify by checking the system clipboard contents after the print (the developer can use pbpaste on macOS, xclip -o on Linux).
+        - If sentinel string is in clipboard -> escape passes through; PROCEED to Task 2.
+        - If not -> escape is stripped or filtered; HALT implementation.
 
-      What to build:
-        - Extend plugins/sprint-orchestrator/scripts/e2e.ts with runAdoptValidateAndWriteMiniRun().
-        - Wire into main() behind grep tag exactly: "adopt validation refusal in-flight refusal golden-fixture happy path"
-        - Golden fixture YAMLs in scripts/fixtures/adopt/ (or match the existing convention if one exists):
-            * valid-proposal.yaml — minimal conforming backlog
-            * invalid-proposal.yaml — fails lintSprint
-            * in-flight-existing.yaml — represents a pre-existing destination with a story in status: in_progress
+      TASK 2 — Implementation (only if spike succeeds):
+        - Extend plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts with:
+            * buildClipboardEscape(payload: string): string — returns the OSC 52 sequence wrapping a base64-encoded payload. Pure function.
+            * Modify buildRunSprintFinalOutput() to emit the OSC 52 escape immediately before the /goal line, UNLESS the env var SPRINT_ORCHESTRATOR_NO_CLIPBOARD is set to "1" or "true".
+        - Add a one-line user-facing note above the fresh-context-guidance line: "(your /goal command is also copied to your clipboard — paste with Cmd+V / Ctrl+V)". Lock this string in the constants module. Only emit it when clipboard escape is being emitted (i.e. opt-out is not set).
 
-      Assertions:
-        (a) Happy path: valid proposal + empty dest -> ok: true, dest contents equal fixture byte-for-byte.
-        (b) Invalid proposal: pre-write a known existing file, invoke with invalid-proposal -> ok: false, reason contains verbatim lint error, dest file is byte-identical to what was pre-written (SHA compare or buffer compare before/after).
-        (c) In-flight refusal: pre-write in-flight-existing.yaml as dest, invoke with valid proposal and force: false -> ok: false, reason names the in-flight story id, dest byte-identical.
+      TASK 3 — e2e (always required):
+        - Extend scripts/e2e.ts with runRunSprintOsc52ClipboardMiniRun() behind grep tag "run-sprint emits OSC 52 clipboard sequence for goal command with opt-out".
+        - Assertions:
+            (a) buildRunSprintFinalOutput(N) WITHOUT the env var set: output contains a substring matching the OSC 52 pattern (\x1b]52;c;[A-Za-z0-9+/=]+\x07), the base64 payload decodes to the canonical /goal command, and the user-facing clipboard note is present.
+            (b) buildRunSprintFinalOutput(N) WITH SPRINT_ORCHESTRATOR_NO_CLIPBOARD=1 set: NO OSC 52 substring present, NO clipboard note in output, /goal line still present as last line.
+            (c) If the spike failed and implementation was dropped: the test stub emits a structured skip with a clear reason; the assertion is recorded as PASS with a note that ties to follow-ups.md.
 
-      Conventions to follow:
-        - Prior mini-runs to mirror: runRunSprintWrapperMiniRun, runProcessBacklogEndOfRunSummaryLinesMiniRun (both in scripts/e2e.ts from prior sprints).
-        - Use temp dirs for destinations.
-        - Direct import of validateAndWriteBacklog from packages/mcp-server/src/tools/adopt-write.ts — do not invoke the skill body.
+      FAILURE PATH (spike fails):
+        - Document the result in _bmad-output/planning-artifacts/follow-ups.md under a new entry "OSC 52 clipboard auto-copy blocked by harness escape filtering" with: what was tested, what was observed, recommended next step (e.g. revisit when Claude Code adds a clipboard primitive).
+        - The e2e mini-run still runs, but its assertions check only that the env-var opt-out is wired (no-op safety) and that no OSC 52 sequence leaks into output.
+
+      OUT OF SCOPE:
+        - Cross-terminal compatibility testing beyond the spike. We trust OSC 52 to do its thing where supported; the env-var opt-out is the user's escape hatch.
+        - README documentation is Story 3.
+
   - id: "3"
-    title: README documents adopt as recommended entrypoint and names the in-plugin adaptor pattern
-    status: done
-    depends_on:
-      - "1"
-      - "2"
+    title: "README documents the new run-sprint output flow (last-line, fresh-context, clipboard auto-copy)"
+    status: ready
+    depends_on: ["1", "2"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "README documents adopt and the in-plugin
-            adaptor pattern"
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"README documents run-sprint last-line fresh-context and clipboard flow\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-adopt-3
-      claimed_at: 2026-05-13T12:04:22.094Z
-      completed_at: 2026-05-13T12:07:48.454Z
-      summary: README "Running a sprint" section now leads with /sprint-orchestrator:adopt, names the
-        in-plugin adaptor pattern with one-way coupling rule, and is locked to a phrases constants
-        module with an e2e mini-run guarding the assertions.
       rework_count: 0
-      artefacts:
-        - git:7870f9c8a3a51c6e3cc94560a1e61c15c1474729
+    notes: |
+      PROBLEM: Stories 1 and 2 change the on-screen behaviour of run-sprint. The README must explain the new flow so users know to expect the /goal line on the last line, that it's in their clipboard (when supported), and the rationale for pasting in a fresh context window.
+
+      BEHAVIOUR (README.md "Running a sprint" section):
+        - Update the run-sprint description to state: the wrapper computes the turn cap (existing content — preserve), prints the canonical /goal command as the final line of output, and on terminals that support OSC 52 also loads it into the user's clipboard.
+        - Add a short rationale: "Paste the /goal command in a fresh context window. A clean transcript gives the /goal evaluator the best chance of correctly deciding when the drain condition is met."
+        - Document the opt-out: "If your terminal renders OSC 52 sequences as garbage characters, set SPRINT_ORCHESTRATOR_NO_CLIPBOARD=1 to disable the clipboard auto-copy."
+        - If Story 2's spike failed and OSC 52 was not implemented: documentation must NOT claim clipboard auto-copy exists. Instead, link to follow-ups.md and note "clipboard auto-copy is tracked as a follow-up."
+
+      LOCK ASSERTION PHRASES:
+        - Mirror the readme-adopt-phrases.ts pattern from the prior sprint.
+        - New module: plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-runsprint-phrases.ts.
+        - Export: FRESH_CONTEXT_RATIONALE (string), CLIPBOARD_OPT_OUT_INSTRUCTION (string).
+
+      INTEGRATION AC:
+        - New e2e mini-run runReadmeDocumentsRunSprintLastLineMiniRun() behind grep tag "README documents run-sprint last-line fresh-context and clipboard flow".
+        - Assertions:
+            (a) "Running a sprint" section of README contains the FRESH_CONTEXT_RATIONALE constant verbatim.
+            (b) The section describes /goal as the final line of output (look for an unambiguous phrase locked in the constants module).
+            (c) Conditional on Story 2 outcome:
+                * If OSC 52 was implemented (constants module exports buildClipboardEscape): README contains CLIPBOARD_OPT_OUT_INSTRUCTION verbatim.
+                * If OSC 52 was dropped to follow-ups: README contains a sentence acknowledging clipboard auto-copy is deferred, with a link or pointer to follow-ups.md.
+
+      FILES TO TOUCH:
         - plugins/sprint-orchestrator/README.md
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-runsprint-phrases.ts (NEW)
         - plugins/sprint-orchestrator/scripts/e2e.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-adopt-phrases.ts
-    notes: >
-      Rewrite the README "Running a sprint" section to lead with adopt, name the adaptor pattern,
-      and state the one-way coupling rule in prose. Lock the assertion phrases to a single source of
-      truth.
 
+      OUT OF SCOPE:
+        - Editing other README sections (adopt, process-backlog) unless those edits are required to keep the "Running a sprint" section coherent.
 
-      Full BMad story spec:
-        _bmad-output/implementation-artifacts/1-3-readme-documents-adopt-as-the-recommended-entrypoint-and-names-the-in-plugin-adaptor-pattern.md
-
-      What to build:
-        - Edit plugins/sprint-orchestrator/README.md "Running a sprint" section:
-            * Lead with /sprint-orchestrator:adopt <path> as recommended entrypoint for any external planning context.
-            * Describe the flow in 2-4 sentences: source -> LLM subagent drafts -> user review (accept/edit/abort) -> on accept, lintSprint validates -> write to sprint-status.yaml.
-            * Immediately after, a short paragraph naming the adaptor pattern as the in-plugin extension point for producer-specific fast paths.
-            * Cite BMad as one possible example, framed as: "BMad is one example; the pattern works for any producer that can emit a conforming backlog."
-            * State the one-way coupling rule in prose: the orchestrator core does not import adaptors; adaptors depend on the schema, never the reverse.
-            * Make explicit no adaptors ship in this sprint — pattern documented for future extension.
-            * PRESERVE the existing run-sprint + cap formula + end-of-run summary lines content (from the prior sprint). Adopt is prepended, not a replacement.
-
-        - Lock assertion phrases to a constants module (mirror packages/mcp-server/src/tools/format-end-of-run-line.ts pattern). Suggested file: packages/mcp-server/src/tools/readme-adopt-phrases.ts (or similar).
-
-        - Producer-name scan (this story's responsibility to verify, not patch):
-            * grep -ri "bmad|linear|notion|jira" plugins/sprint-orchestrator/skills/adopt/ plugins/sprint-orchestrator/packages/mcp-server/src/tools/adopt-write.ts
-            * Expect zero hits. If hits exist, this is a Story 1 bug — surface in the reviewer feedback.
-
-        - e2e mini-run: runReadmeDocumentsAdoptAndAdaptorPatternMiniRun() in scripts/e2e.ts.
-            * Reads README, extracts "Running a sprint" section.
-            * Asserts: (a) "/sprint-orchestrator:adopt" present in that section, (b) "adaptor pattern" phrase present, (c) one-way-coupling statement present (use the constant), (d) grep tag matches "README documents adopt and the in-plugin adaptor pattern".
-
-      Out of scope:
-        - Building any adaptor (e.g. bmad-to-orchestrator). README names the pattern only.
-        - Authoring a separate schema doc. README may link to lintSprint as the schema source of truth.
   - id: "4"
-    title: Ship gate — pnpm e2e + verify green
-    status: done
-    depends_on:
-      - "1"
-      - "2"
-      - "3"
+    title: "Ship gate — pnpm e2e + verify green"
+    status: ready
+    depends_on: ["1", "2", "3"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e"
           expect_exit: 0
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-adopt-4
-      claimed_at: 2026-05-13T12:07:58.794Z
       rework_count: 0
-      completed_at: 2026-05-13T12:09:38.522Z
-      summary: "Ship gate passed: pnpm e2e (45/45 assertions) and pnpm verify (build, typecheck, lint, 127
-        tests) both green, confirming stories 1-3 integrate cleanly."
-    notes: >
-      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
-      cleanly and don't regress existing assertions.
+    notes: |
+      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate cleanly and don't regress existing assertions.
 
-
-      If this fails, the reviewer should rework the offending prior story, not record this one as
-      failed.
-
-
-      Full BMad story spec:
-        _bmad-output/implementation-artifacts/1-4-ship-gate-pnpm-e2e-verify-green.md
+      If this fails, the reviewer should rework the offending prior story, not record this one as failed.
