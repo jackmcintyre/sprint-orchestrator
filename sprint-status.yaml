@@ -1,311 +1,100 @@
-sprint_id: orchestrator-bugfix-sprint-2
+# PR-per-story sprint 1.1 — branch-per-story (no push, no PR yet).
+#
+# Smallest useful slice of the PR-per-story workflow. When a user opts in via
+# config, each story's commits land on its own local branch instead of the
+# shared sprint branch. No remote interaction, no PR creation. That's slice
+# 1.2's job.
+#
+# Discipline: keep this small. Target ~250 lines of diff total.
+
+sprint_id: pr-per-story-sprint-1.1
 stories:
   - id: "1"
-    title: Build e2e harness — fixture sprint + pnpm e2e script
-    status: done
+    title: Add pr_per_story and default_base to OrchestratorConfig (passive)
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
-        - type: file_exists
-          path: plugins/sprint-orchestrator/__fixtures__/tiny-sprint/sprint-status.yaml
-        - type: file_exists
-          path: plugins/sprint-orchestrator/scripts/e2e.ts
         - type: regex
-          cmd: cat plugins/sprint-orchestrator/package.json
-          pattern: '"e2e"'
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
+          pattern: "pr_per_story"
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
+          pattern: "default_base"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix2-1
-      claimed_at: 2026-05-13T01:45:52.068Z
-      completed_at: 2026-05-13T01:53:15.831Z
-      summary: Added tiny-sprint fixture and scripts/e2e.ts harness driving the orchestrator state machine
-        end-to-end, plus pnpm e2e script.
-      artefacts:
-        - git:56be0a5cb58af5d6fb81a81fccc18da9cbfae1a9
-        - plugins/sprint-orchestrator/__fixtures__/tiny-sprint/sprint-status.yaml
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-        - plugins/sprint-orchestrator/package.json
+    orchestrator: {}
     notes: |
-      Build a tiny end-to-end test harness that exercises the orchestrator
-      against a real (but throwaway) git repo.
+      Add two optional fields to OrchestratorConfig:
+        - pr_per_story?: boolean   // default false
+        - default_base?: string    // default "main"
 
-      Components:
-        - __fixtures__/tiny-sprint/ — a self-contained fixture with:
-          - A throwaway sprint-status.yaml with 2 stories (1 happy-path,
-            1 designed to hit rework cap).
-          - A minimal source tree the dev subagent can modify.
-          - A .gitignore that excludes .DS_Store and friends.
-        - scripts/e2e.ts — programmatically:
-          1. Copies fixture into a temp git repo (init, initial commit).
-          2. Spins up the MCP server pointed at the temp repo.
-          3. Drives the orchestrator state machine through the full flow:
-             claimStory -> (simulated dev edit) -> validateAcceptanceCriteria
-             -> commitStoryArtefacts -> markStoryComplete (or *Failed).
-          4. Asserts post-conditions:
-             - Two distinct commits per happy-path story (code + state)
-             - sprint-status.yaml shape: status=done, completed_at present
-             - Failed story: status="failed" (not "blocked")
-             - Auto-promotion: backlog story with done dep gets returned
-               by getReadyStories without manual flip
-             - No stray junk files committed (.DS_Store, .sprint-orchestrator/)
-             - run.log contains story_start + story_end with correct outcomes
-          5. Tears down temp repo.
-        - package.json: "e2e": "tsx scripts/e2e.ts"
+      Read both from .sprint-orchestrator/config.yaml; pass through in the
+      tool's return value. NO BEHAVIOR CHANGE in this story — the fields are
+      consumed in story 2.
 
-      Acceptance: pnpm e2e exits 0 against the current (broken) build.
-      Stories 2-5 below WILL fail this initially — that's the point. Each
-      regression fix must make e2e pass without regressing other assertions.
+      Tests: config without either field defaults pr_per_story=false; config
+      with explicit values round-trips.
 
-      This story has no dev-side runtime dependencies (it just adds a script);
-      the assertions it makes will fail until later stories land. That's
-      fine — it sets the bar that other stories must clear.
   - id: "2"
-    title: Wire markStoryComplete to commit sprint-status.yaml separately
-    status: done
+    title: Branch-per-story when flag is on (local only, no push)
+    status: ready
     depends_on:
       - "1"
     acceptance_criteria:
       checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-complete.ts
-          pattern: git commit
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "two commits per happy-path story"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "branch-per-story"
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix2-2b
-      claimed_at: 2026-05-13T02:00:31.231Z
-      completed_at: 2026-05-13T02:01:41.837Z
-      summary: State-mutating tools now commit sprint-status.yaml as a separate idempotent commit so state
-        mutations don't leak into the next story's code commit.
-      artefacts:
-        - git:b0bb98a329d6e49e993fdad718bc0b620194bfcc
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-complete.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/lib/commit-state.ts
+    orchestrator: {}
     notes: |
-      ROOT CAUSE OF BUG 1: bugfix-1 story #1 added the
-      `:!sprint-status.yaml` exclusion in commitStoryArtefacts but no
-      story ever wired markStoryComplete to commit sprint-status.yaml
-      separately. Result: state mutations sit in the working tree until
-      the NEXT story's commitStoryArtefacts slurps them up.
+      When pr_per_story is true, the orchestrator creates a per-story branch
+      from default_base before the dev subagent starts work. The dev's commits
+      then land on that branch. When pr_per_story is false, behavior is
+      unchanged (commits go on whatever branch is checked out).
 
-      Fix: markStoryComplete (after writing the state mutation) runs:
-        git add sprint-status.yaml
-        git commit -m "chore(sprint): persist <story-id> completion" \
-          --trailer "Co-authored-by: Claude <noreply@anthropic.com>"
+      Recommended implementation: a new MCP tool `prepareStoryBranch(storyId,
+      agentId)` called by the process-backlog skill between claimStory and
+      spawning the dev subagent. The tool:
+        - Reads config; no-ops if pr_per_story is false (returns { branch: null }).
+        - If true: computes branch name `<story-id>-<slug-of-title>` (lowercase,
+          alphanumerics+hyphens, max 40 chars).
+        - Runs `git checkout -b <branch> <default_base>` from ctx.projectRoot.
+        - Persists `branch` on story.orchestrator so slice 1.2 (push) can read it.
+        - Returns { branch }.
 
-      Idempotent: if `git status sprint-status.yaml` shows nothing, skip
-      the commit (returns gracefully — state was already persisted, e.g.
-      from a no-op write).
+      Skill update: process-backlog calls prepareStoryBranch right after
+      claimStory succeeds, before spawning the dev subagent.
 
-      Suspected secondary issue worth verifying: the pathspec
-      `":!sprint-status.yaml"` may need a positive-pathspec partner or
-      `--` separator. Confirm by inspection of dist/ post-fix and add a
-      direct shell check to the e2e harness that runs commitStoryArtefacts
-      with sprint-status.yaml dirty and asserts it's NOT in the commit.
+      E2E harness: extend the tiny-sprint fixture to also exercise a
+      pr_per_story=true config. Add a new assertion "branch-per-story: story
+      A's commits land on its own branch when flag is on". Existing 7
+      assertions must still pass (flag off by default in the existing run).
 
-      This story also makes corresponding changes to markStoryFailed and
-      markStoryNeedsRework — all three state-mutating tools must commit
-      sprint-status.yaml when they mutate it.
+      Out of scope (slice 1.2): pushing the branch, opening a PR, auto-merge,
+      anything that touches origin or gh.
 
-      INTEGRATION AC: e2e harness asserts two distinct commits per
-      happy-path story (one code, one state).
   - id: "3"
-    title: Diagnose and fix backlog auto-promotion
-    status: done
-    depends_on:
-      - "1"
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "auto-promotion"
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix2-3
-      claimed_at: 2026-05-13T02:01:53.149Z
-      completed_at: 2026-05-13T02:11:48.564Z
-      summary: Fixed auto-promotion stale-dist regression by adding `prepare` build script to mcp-server
-        and `ensureDistBuilt()` in the e2e harness; the auto-promotion assertion now imports from
-        dist (the same entry the MCP server runs) and passes.
-      artefacts:
-        - git:217f812893f9788207034c0103de94b9c9a7f25c
-        - plugins/sprint-orchestrator/packages/mcp-server/package.json
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-    notes: |
-      ROOT CAUSE OF BUG 2: unknown. Bugfix-1 story #2's dev claimed to
-      add a promoteBacklogStories helper to get-ready-stories.ts with
-      three passing unit tests. End-to-end test shows it doesn't fire.
-
-      Hypotheses to investigate (in suspicion order):
-        1. The helper is called but its persist-write is overwritten by
-           a subsequent state-write elsewhere (file lock semantics).
-        2. The helper runs but its match logic depends on a field shape
-           the real Tinytodo plan doesn't satisfy (e.g. depends_on string
-           equality vs array contains, or ID quoting differences).
-        3. The helper is called but its branch on the get-ready-stories
-           code path is never taken.
-        4. The dev's tests passed with controlled fixtures that don't
-           reflect the orchestrator-skill's actual call sequence.
-
-      Investigation: dev should first write a *failing* e2e assertion
-      that reproduces Jack's case (backlog story with done dep, expected
-      ready, observed backlog), then diagnose, then fix. The repro IS
-      part of the deliverable.
-
-      INTEGRATION AC: e2e harness asserts a backlog story with one done
-      dep is returned by getReadyStories without manual flip.
-  - id: "5"
-    title: Stage by artefact allowlist + ship default .sprint-orchestrator/ exclusion
-    status: done
-    depends_on:
-      - "1"
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
-          pattern: \.sprint-orchestrator
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "no junk files"
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix2-5
-      claimed_at: 2026-05-13T02:30:32.455Z
-      completed_at: 2026-05-13T02:33:47.251Z
-      summary: Extended commitStoryArtefacts pathspec exclusions to keep .sprint-orchestrator/, .claude/,
-        .DS_Store, and node_modules out of orchestrator commits, with new e2e + unit coverage.
-      artefacts:
-        - git:d63a24bf64b9ebbe269a776dd4559ab8144ed208
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
-    notes: |
-      ROOT CAUSE OF NEW BUGS 1+2: commitStoryArtefacts uses `git add -A`
-      with only sprint-status.yaml excluded. In a real repo without a
-      .gitignore (or with gaps), this commits .DS_Store, .sprint-orchestrator/
-      contents, .claude/scheduled_tasks.lock, and other crud.
-
-      Fix (option A — minimal): extend the pathspec exclusion to also
-      exclude `:!.sprint-orchestrator` and `:!.claude` and common system
-      noise (`:!**/.DS_Store`, `:!node_modules`).
-
-      Fix (option B — robust): switch to artefact-allowlist staging.
-      The story state has an `orchestrator.artefacts: [...]` array
-      populated by markStoryComplete. commitStoryArtefacts could stage
-      ONLY those paths. Tighter, more deliberate, but requires the dev
-      subagent to declare its artefacts upfront — which it doesn't
-      reliably do today.
-
-      Recommended: option A for this sprint; option B captured as a
-      follow-up. Document in commitStoryArtefacts docstring that it
-      relies on user .gitignore for additional cleanliness.
-
-      INTEGRATION AC: e2e harness fixture has no .gitignore, but the
-      commit produced by commitStoryArtefacts contains no .DS_Store,
-      .sprint-orchestrator/, or sprint-status.yaml entries.
-  - id: "7"
-    title: AC linter — flag structural-only ACs on state-mutator stories
-    status: done
-    depends_on:
-      - "1"
-    acceptance_criteria:
-      checks:
-        - type: file_exists
-          path: plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
-          pattern: state.mutator
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-          pattern: lintSprint
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix2-7
-      claimed_at: 2026-05-13T02:37:03.791Z
-      completed_at: 2026-05-13T02:41:02.556Z
-      summary: Added read-only lintSprint MCP tool that flags state-mutator stories missing integration
-        ACs, known-bad shell patterns (vitest --grep), and trivially-satisfiable regex checks;
-        registered in server with tests.
-      artefacts:
-        - git:20ec63a960cbdafb3c63d7f18a16acf43eea1ed4
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/lint-sprint.test.ts
-    notes: |
-      Carried forward from the original bugfix-2 backlog (AC dry-run
-      tool), with one critical addition derived from the bugfix-1 retest.
-
-      Add a read-only MCP tool `lintSprint(sprintStatusPath?)` that:
-        - Loads sprint-status.yaml.
-        - For each story:
-          - Detects "state-mutator stories" — stories whose AC checks
-            reference modifications to: mark-story-*.ts,
-            commit-story-artefacts.ts, get-ready-stories.ts, schema.ts,
-            or other identified state-machine files.
-          - For each state-mutator story, requires at least one shell AC
-            that runs `pnpm e2e` (or equivalent integration test). If
-            absent, report a high-severity warning: "state-mutator story
-            with no integration AC".
-          - For each shell AC, lint known-bad patterns (vitest --grep,
-            etc.) — original lintSprint scope.
-          - For each regex AC, warn if the pattern is suspiciously
-            trivial (single literal grep) — original scope.
-        - Returns { issues, rendered }.
-
-      INTEGRATION AC: lint a fixture sprint with a state-mutator story
-      that lacks an e2e check, assert the lint warning fires.
-  - id: "8"
-    title: Sprint ship gate — every sprint's last story runs e2e
-    status: done
+    title: Ship gate — pnpm e2e green
+    status: ready
     depends_on:
       - "1"
       - "2"
-      - "3"
-      - "5"
     acceptance_criteria:
       checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-          pattern: ship gate
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-bugfix2-8
-      claimed_at: 2026-05-13T02:41:16.472Z
-      completed_at: 2026-05-13T02:43:17.540Z
-      summary: Documented ship-gate authoring rule in process-backlog SKILL.md; e2e and verify suites both
-        green, proving bugfix-2 sprint integrates cleanly.
-      artefacts:
-        - git:3c01e55cdaed20ca8fa8cf322ff0c757958aeec9
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-        - /Users/jackmcintyre/projects/claude-dev-loop/sprint-status.yaml
+    orchestrator: {}
     notes: |
-      Document in the process-backlog skill that every sprint MUST end
-      with a "ship gate" story whose AC runs `pnpm e2e`. This is the
-      author-facing rule.
-
-      No code change required for this story other than a README/skill
-      doc update — the discipline is what's being installed. Future
-      sprints (PR-per-story etc.) will include their own ship gate
-      story per this rule.
-
-      Also: this very sprint demonstrates the rule. Story 8 IS the ship
-      gate for bugfix-2, and its `pnpm e2e` AC must pass with stories
-      2-5 all landed.
-
-      INTEGRATION AC: this story's own pnpm e2e check, which can only
-      pass if all regression fixes are working end-to-end.
+      Per the discipline rule documented in process-backlog/SKILL.md, every
+      sprint ends with a ship gate story whose AC runs the full e2e suite.
+      No production code change here; this story exists to prove the slice
+      integrates cleanly end-to-end.
