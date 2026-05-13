@@ -30,6 +30,7 @@ import { markStoryNeedsRework } from "../packages/mcp-server/src/tools/mark-stor
 import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-story-branch.js";
 import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story-reopen.js";
 import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
+import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -1369,6 +1370,160 @@ async function runRecordStoryReopenMiniRun(): Promise<AssertionOutcome[]> {
   return outcomes;
 }
 
+/**
+ * Mini-run for story 4: lintSprint must flag shell `cmd` fields that would
+ * break YAML.parse if dumped unquoted (e.g. unquoted apostrophe + colon
+ * inside a `--grep "x: y"` arg). The fixture sprint here writes such a cmd
+ * literally — the kind of content a sprint-planning LLM emits when it forgets
+ * to quote the value.
+ */
+async function runLintSprintYamlSafetyMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-lint-yaml-"));
+  const outcomes: AssertionOutcome[] = [];
+  try {
+    // Hand-author the sprint-status.yaml so the unquoted `"x: y"` reaches
+    // disk verbatim — that's the on-the-wire shape the regression-producing
+    // story shipped, and what lintSprint must reject.
+    const sprintPath = path.join(root, "sprint-status.yaml");
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "lint-yaml-safety-fixture"',
+      "stories:",
+      '  - id: "Y1"',
+      '    title: "shell cmd has unquoted colon inside double-quoted grep arg"',
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: shell",
+      '          cmd: pnpm e2e --grep "x: y"',
+      "          expect_exit: 0",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    await fs.writeFile(sprintPath, sprintYaml, "utf8");
+
+    const ctx: ToolContext = {
+      projectRoot: root,
+      sprintStatusPath: sprintPath,
+      configPath: path.join(root, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // The sprint file is intentionally malformed — YAML.parse on the raw doc
+    // would either fail or produce a nested mapping. lintSprint depends on
+    // readSprintStatus, which calls YAML.parse, so the unquoted cmd from disk
+    // either crashes the read or parses to something other than the literal
+    // string. Either way, lintSprint must NOT silently accept it.
+    //
+    // Empirically the yaml lib parses `cmd: pnpm e2e --grep "x: y"` as
+    // {cmd: 'pnpm e2e --grep "x', y: 'y"'}, which fails the zod schema. The
+    // contract for this story is that an LLM-emitted sprint with that exact
+    // wire form is rejected, with a YAML-safety lint issue pointing at the
+    // cmd's location.
+    //
+    // Two acceptable shapes for "rejected": (1) lintSprint throws while
+    // parsing, with an error message naming the offending location; or
+    // (2) lintSprint succeeds and reports a YAML-safety issue.
+    let parseError: Error | null = null;
+    let report: Awaited<ReturnType<typeof lintSprint>> | null = null;
+    try {
+      report = await lintSprint(ctx);
+    } catch (err) {
+      parseError = err as Error;
+    }
+
+    // If the readSprintStatus call swallowed the issue (parsed successfully),
+    // verify lintSprint produced the YAML-safety issue on its own. If it
+    // crashed, that's still a "reject" — but the integration AC for this
+    // story is the in-band issue path, so we additionally drive a second
+    // fixture whose cmd parses cleanly but is still YAML-ambiguous on dump.
+    const checks: Assertion[] = [
+      {
+        name: "lintSprint flags shell cmd fields with unquoted YAML-special characters",
+        run: async () => {
+          // Path B (the in-band one this story is really about): construct a
+          // sprint via the safe path (writeSprintStatus → quoted on dump) but
+          // mutate the cmd in memory to the dangerous wire form before
+          // lintSprint sees it. We do this by writing the fixture using the
+          // yaml lib's quoted-style emit so readSprintStatus succeeds, then
+          // verify lintSprint still flags it.
+          const safeSprintPath = path.join(root, "sprint-status-quoted.yaml");
+          const quotedYaml = [
+            "schema_version: 1",
+            'sprint_id: "lint-yaml-safety-quoted"',
+            "stories:",
+            '  - id: "Y1"',
+            '    title: "cmd quoted at rest, contains YAML-ambiguous chars"',
+            "    status: ready",
+            "    depends_on: []",
+            "    acceptance_criteria:",
+            "      checks:",
+            "        - type: shell",
+            // Quoted on disk so readSprintStatus is happy; the inner string
+            // still contains an unquoted-colon-in-flow-context that would
+            // break a future round-trip if someone hand-edits the yaml.
+            '          cmd: "pnpm e2e --grep \\"x: y\\""',
+            "          expect_exit: 0",
+            "    orchestrator: {}",
+            "",
+          ].join("\n");
+          await fs.writeFile(safeSprintPath, quotedYaml, "utf8");
+          const ctxB: ToolContext = {
+            projectRoot: root,
+            sprintStatusPath: safeSprintPath,
+            configPath: ctx.configPath,
+          };
+          const reportB = await lintSprint(ctxB, { sprintStatusPath: safeSprintPath });
+          const yamlIssue = reportB.issues.find(
+            (i) => i.storyId === "Y1" && /YAML-ambiguous/.test(i.message),
+          );
+          expect(!!yamlIssue, `expected a YAML-safety issue for Y1, got: ${reportB.rendered}`);
+          expect(
+            yamlIssue!.severity === "error",
+            `expected severity=error, got ${yamlIssue!.severity}`,
+          );
+          expect(
+            yamlIssue!.checkIndex === 0,
+            `expected checkIndex=0, got ${yamlIssue!.checkIndex}`,
+          );
+          expect(
+            /stories\[Y1\]\.acceptance_criteria\.checks\[0\]\.cmd/.test(yamlIssue!.message),
+            `expected message to point at stories[Y1]...checks[0].cmd, got: ${yamlIssue!.message}`,
+          );
+          // The wire-form path (sprintPath, the unquoted variant) must also
+          // be rejected. Either readSprintStatus threw, or lintSprint
+          // produced an issue. Anything else is the regression.
+          const wireRejected =
+            parseError !== null ||
+            (report !== null &&
+              report.issues.some((i) => i.storyId === "Y1" && /YAML-ambiguous/.test(i.message)));
+          expect(
+            wireRejected,
+            `unquoted-cmd sprint on disk was silently accepted (parseError=${String(
+              parseError,
+            )}, issues=${JSON.stringify(report?.issues ?? [])})`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -1479,6 +1634,17 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: recordStoryReopen recovery from failed");
     const reopenOutcomes = await runRecordStoryReopenMiniRun();
     outcomes.push(...reopenOutcomes);
+  }
+
+  // Eighth mini-run (story 4): lintSprint flags shell cmd fields whose string
+  // form is not YAML-safe (would crash a future YAML.parse round-trip).
+  if (
+    !filter ||
+    filter.test("lintSprint flags shell cmd fields with unquoted YAML-special characters")
+  ) {
+    console.log("[e2e] mini-run: lintSprint YAML-safety check on shell cmd fields");
+    const yamlSafetyOutcomes = await runLintSprintYamlSafetyMiniRun();
+    outcomes.push(...yamlSafetyOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);

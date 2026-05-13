@@ -185,6 +185,64 @@ describe("lintSprint", () => {
     expect(report.rendered).toMatch(/clean/);
   });
 
+  it("flags shell cmd fields with unquoted YAML-special characters", async () => {
+    const { ctx } = await setup({
+      sprint_id: "lint-fixture-yaml-unsafe",
+      stories: [
+        {
+          id: "Y1",
+          title: "cmd has unquoted colon inside double-quoted grep arg",
+          status: "ready",
+          depends_on: [],
+          acceptance_criteria: {
+            checks: [
+              {
+                type: "shell",
+                cmd: 'pnpm e2e --grep "x: y"',
+                expect_exit: 0,
+              },
+            ],
+          },
+          orchestrator: {},
+        },
+      ],
+    });
+    const report = await lintSprint(ctx);
+    const yamlIssue = report.issues.find(
+      (i) => i.storyId === "Y1" && /YAML-ambiguous/.test(i.message),
+    );
+    expect(yamlIssue).toBeDefined();
+    expect(yamlIssue!.severity).toBe("error");
+    expect(yamlIssue!.checkIndex).toBe(0);
+    expect(yamlIssue!.message).toMatch(/stories\[Y1\]\.acceptance_criteria\.checks\[0\]\.cmd/);
+  });
+
+  it("does not flag a yaml-safe shell cmd", async () => {
+    const { ctx } = await setup({
+      sprint_id: "lint-fixture-yaml-safe",
+      stories: [
+        {
+          id: "Y2",
+          title: "cmd is plain and unambiguous",
+          status: "ready",
+          depends_on: [],
+          acceptance_criteria: {
+            checks: [
+              {
+                type: "shell",
+                cmd: "pnpm --dir plugins/sprint-orchestrator e2e",
+                expect_exit: 0,
+              },
+            ],
+          },
+          orchestrator: {},
+        },
+      ],
+    });
+    const report = await lintSprint(ctx);
+    expect(report.issues.filter((i) => /YAML-ambiguous/.test(i.message))).toHaveLength(0);
+  });
+
   it("respects an explicit sprintStatusPath override", async () => {
     const { ctx } = await setup({
       sprint_id: "default-sprint",

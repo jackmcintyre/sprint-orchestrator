@@ -1,3 +1,4 @@
+import * as YAML from "yaml";
 import { readSprintStatus } from "../state/sprint-status.js";
 import { type Check, type Story } from "../state/schema.js";
 import { type ToolContext } from "./context.js";
@@ -76,6 +77,31 @@ function isTrivialRegex(pattern: string): boolean {
   return !meta.test(pattern);
 }
 
+/**
+ * Returns `true` when a shell `cmd` string would round-trip cleanly if dropped
+ * unquoted into a YAML mapping value. We construct the synthetic doc
+ * `cmd: <raw value>\n` and parse it; if parsing fails or the parsed scalar
+ * does not match the original, the cmd needs to be quoted in sprint-status.
+ *
+ * This catches the regression where an unquoted apostrophe + colon (e.g.
+ * `pnpm ... --grep "x: y"`) caused YAML.parse to error mid-run with
+ * "Nested mappings are not allowed in compact mappings".
+ */
+function isYamlSafeCmd(cmd: string): boolean {
+  // A YAML scalar that contains a newline can't be expressed as a plain
+  // flow scalar at all — flag it.
+  if (cmd.includes("\n")) return false;
+  const synthetic = `cmd: ${cmd}\n`;
+  try {
+    const parsed = YAML.parse(synthetic) as unknown;
+    if (parsed === null || typeof parsed !== "object") return false;
+    const value = (parsed as Record<string, unknown>).cmd;
+    return typeof value === "string" && value === cmd;
+  } catch {
+    return false;
+  }
+}
+
 function lintStory(story: Story): LintIssue[] {
   const issues: LintIssue[] = [];
   const checks = story.acceptance_criteria.checks ?? [];
@@ -99,6 +125,14 @@ function lintStory(story: Story): LintIssue[] {
         if (pattern.test(check.cmd)) {
           issues.push({ storyId: story.id, checkIndex: idx, severity: "warn", message });
         }
+      }
+      if (!isYamlSafeCmd(check.cmd)) {
+        issues.push({
+          storyId: story.id,
+          checkIndex: idx,
+          severity: "error",
+          message: `shell cmd contains YAML-ambiguous characters (likely unquoted ':' or quote chars). Quote the cmd value: cmd: "${check.cmd}". Location: stories[${story.id}].acceptance_criteria.checks[${idx}].cmd`,
+        });
       }
     }
     if (check.type === "regex") {
