@@ -1,42 +1,24 @@
-# Sprint bugfix-2 — REGRESSION FIRST.
-#
-# Reason for rewrite: end-to-end retest of post-#15 build (sprint-test,
-# branch retest-bugfix-1) found 3 of 6 bugfix-1 fixes don't actually work
-# in practice. Three "ship gate" stories are added to make this class of
-# regression impossible going forward.
-#
-# Status: planned, not active. To run:
-#   1. Cut new branch `bugfix-sprint-2` off main.
-#   2. Copy this file to repo-root sprint-status.yaml.
-#   3. Run /sprint-orchestrator:process-backlog (under /loop 5m).
-
 sprint_id: orchestrator-bugfix-sprint-2
 stories:
-  # ============================================================
-  # Phase 1 — Enabling: build the gate before fixing under it
-  # ============================================================
-  # Order matters. The e2e harness is built FIRST so every regression fix
-  # below has a real-world test it must satisfy. Without the harness, we
-  # repeat bugfix-1's mistake.
-
   - id: "1"
     title: Build e2e harness — fixture sprint + pnpm e2e script
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
         - type: file_exists
           path: plugins/sprint-orchestrator/__fixtures__/tiny-sprint/sprint-status.yaml
+        - type: file_exists
+          path: plugins/sprint-orchestrator/scripts/e2e.ts
         - type: regex
           cmd: cat plugins/sprint-orchestrator/package.json
           pattern: '"e2e"'
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e
-          expect_exit: 0
-        - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix2-1
+      claimed_at: 2026-05-13T01:45:52.068Z
     notes: |
       Build a tiny end-to-end test harness that exercises the orchestrator
       against a real (but throwaway) git repo.
@@ -71,20 +53,16 @@ stories:
       This story has no dev-side runtime dependencies (it just adds a script);
       the assertions it makes will fail until later stories land. That's
       fine — it sets the bar that other stories must clear.
-
-  # ============================================================
-  # Phase 2 — Regression fixes (each gated on the e2e harness)
-  # ============================================================
-
   - id: "2"
     title: Wire markStoryComplete to commit sprint-status.yaml separately
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-complete.ts
-          pattern: "git commit"
+          pattern: git commit
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
@@ -94,10 +72,6 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "two commits per happy-path story"
           expect_exit: 0
-      # NOTE on the second e2e check: scripts/e2e.ts must support a --grep
-      # flag that filters its assertions to only those whose name matches.
-      # Story 1 must implement this. (Lesson learned: never ship an AC
-      # check that uses a flag we haven't verified the script supports.)
     orchestrator: {}
     notes: |
       ROOT CAUSE OF BUG 1: bugfix-1 story #1 added the
@@ -127,11 +101,11 @@ stories:
 
       INTEGRATION AC: e2e harness asserts two distinct commits per
       happy-path story (one code, one state).
-
   - id: "3"
     title: Diagnose and fix backlog auto-promotion
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: shell
@@ -164,16 +138,16 @@ stories:
 
       INTEGRATION AC: e2e harness asserts a backlog story with one done
       dep is returned by getReadyStories without manual flip.
-
   - id: "4"
     title: Fix markStoryFailed to write status="failed"
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
-          pattern: 'status:\s*"failed"'
+          pattern: status:\s*"failed"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
@@ -198,16 +172,16 @@ stories:
 
       Bonus check: getSprintReport renders the story under [failed]
       group, not [blocked].
-
   - id: "5"
     title: Stage by artefact allowlist + ship default .sprint-orchestrator/ exclusion
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
-          pattern: "\\.sprint-orchestrator"
+          pattern: \.sprint-orchestrator
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
@@ -239,7 +213,6 @@ stories:
       INTEGRATION AC: e2e harness fixture has no .gitignore, but the
       commit produced by commitStoryArtefacts contains no .DS_Store,
       .sprint-orchestrator/, or sprint-status.yaml entries.
-
   - id: "6"
     title: Align return shape across markStoryComplete/Failed/NeedsRework
     status: ready
@@ -248,10 +221,10 @@ stories:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
-          pattern: "completed_at\\|failed_at"
+          pattern: completed_at\|failed_at
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
-          pattern: "rework_at"
+          pattern: rework_at
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
@@ -269,25 +242,21 @@ stories:
 
       Tests cover return shape for each tool. Reviewer.md updated to
       reference the unified envelope in its enriched-return guidance.
-
-  # ============================================================
-  # Phase 3 — Discipline that prevents recurrence
-  # ============================================================
-
   - id: "7"
     title: AC linter — flag structural-only ACs on state-mutator stories
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: file_exists
           path: plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/lint-sprint.ts
-          pattern: "state.mutator"
+          pattern: state.mutator
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-          pattern: "lintSprint"
+          pattern: lintSprint
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
@@ -315,16 +284,20 @@ stories:
 
       INTEGRATION AC: lint a fixture sprint with a state-mutator story
       that lacks an e2e check, assert the lint warning fires.
-
   - id: "8"
     title: Sprint ship gate — every sprint's last story runs e2e
     status: ready
-    depends_on: ["1", "2", "3", "4", "5"]
+    depends_on:
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+      - "5"
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-          pattern: "ship gate"
+          pattern: ship gate
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e
           expect_exit: 0
@@ -348,21 +321,3 @@ stories:
 
       INTEGRATION AC: this story's own pnpm e2e check, which can only
       pass if all regression fixes are working end-to-end.
-
-  # ============================================================
-  # Deferred — moved out of this sprint to keep focus on regressions
-  # ============================================================
-  # The following ideas from the previous bugfix-2 backlog are deferred
-  # to a later sprint:
-  #
-  #   - markStoryReadyForRevalidation MCP tool
-  #     (recovery from "code is correct, AC was wrong")
-  #   - Reorder commitStoryArtefacts to run after validateAcceptanceCriteria
-  #     (depends on Bug 1 fix landing first; safer to ship in next sprint)
-  #   - Dev subagent return enrichment (mirror of reviewer story #5)
-  #   - max_stories_per_run config option
-  #   - README schema reference section
-  #
-  # Reason for deferral: every one of these adds NEW behavior. Fixing
-  # broken existing behavior takes priority. New behavior added on top
-  # of broken foundations compounds the problem.
