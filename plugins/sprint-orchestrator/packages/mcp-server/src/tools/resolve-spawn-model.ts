@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import * as YAML from "yaml";
 
 import { type ToolContext } from "./context.js";
-import { type SpawnRole, defaultModelForRole } from "./model-tiering-defaults.js";
+import { DEEP_MODEL, type SpawnRole, defaultModelForRole } from "./model-tiering-defaults.js";
+import { readSprintStatus } from "../state/sprint-status.js";
 
 /**
  * Resolve the model ID the orchestrator should pass to the Task tool when
@@ -31,14 +32,24 @@ export interface ResolveSpawnModelInput {
 export interface ResolveSpawnModelResult {
   model: string;
   /** Where the resolver actually picked the model from — for observability. */
-  source: "config" | "frontmatter" | "fallback";
+  source: "config" | "frontmatter" | "fallback" | "rework-escalation";
 }
 
 export async function resolveSpawnModel(
   ctx: ToolContext,
   input: ResolveSpawnModelInput,
 ): Promise<ResolveSpawnModelResult> {
-  const { role } = input;
+  const { role, storyId } = input;
+
+  // (0) Rework escalation — dev re-spawns after one or more rework swings
+  // jump to Opus, overriding both config and frontmatter. Reviewer is never
+  // escalated by this rule (model-tiering-v1 brief decision).
+  if (role === "dev") {
+    const reworkCount = await readReworkCount(ctx.sprintStatusPath, storyId);
+    if (reworkCount > 0) {
+      return { model: DEEP_MODEL, source: "rework-escalation" };
+    }
+  }
 
   // (1) Config override.
   const configModel = await readConfigModelForRole(ctx.configPath, role);
@@ -55,6 +66,23 @@ export async function resolveSpawnModel(
 
   // (3) Static fallback constant.
   return { model: defaultModelForRole(role), source: "fallback" };
+}
+
+/**
+ * Read `orchestrator.rework_count` for `storyId` from the sprint-status
+ * YAML at `sprintStatusPath`. Returns 0 when the file is missing, the
+ * story is missing, or the field is absent — the rework-escalation rule
+ * is "> 0", so a missing/zero value means "no escalation".
+ */
+async function readReworkCount(sprintStatusPath: string, storyId: string): Promise<number> {
+  try {
+    const state = await readSprintStatus(sprintStatusPath);
+    const story = state.stories.find((s) => s.id === storyId);
+    return story?.orchestrator?.rework_count ?? 0;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw err;
+  }
 }
 
 async function readConfigModelForRole(configPath: string, role: SpawnRole): Promise<string | null> {

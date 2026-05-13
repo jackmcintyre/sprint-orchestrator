@@ -71,6 +71,7 @@ import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/val
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { buildServer } from "../packages/mcp-server/src/index.js";
 import {
+  DEEP_MODEL,
   DEFAULT_DEV_MODEL,
   DEFAULT_REVIEWER_MODEL,
 } from "../packages/mcp-server/src/tools/model-tiering-defaults.js";
@@ -3371,6 +3372,14 @@ async function main(): Promise<number> {
     outcomes.push(...resolveOutcomes);
   }
 
+  // model-tiering-v1 sprint, story 2: rework escalation — dev re-spawns after
+  // rework jump to Opus regardless of static defaults; reviewer never escalates.
+  if (!filter || filter.test("resolveSpawnModel escalates dev on rework only")) {
+    console.log("[e2e] mini-run: resolveSpawnModel rework escalation");
+    const escalationOutcomes = await runResolveSpawnModelEscalationMiniRun();
+    outcomes.push(...escalationOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -3594,6 +3603,176 @@ async function runResolveSpawnModelStaticMiniRun(): Promise<AssertionOutcome[]> 
       );
     },
   });
+
+  return outcomes;
+}
+
+/**
+ * model-tiering-v1 sprint, story 2 — resolveSpawnModel rework escalation.
+ *
+ * Four fixtures exercising the locked v1 rule "dev attempts after rework run
+ * on Opus." Each fixture builds a real temp dir with a real sprint-status.yaml
+ * (orchestrator.rework_count varied), a real config.yaml (frontmatter and
+ * config set Sonnet so we can prove the escalation overrides them), and a
+ * stub agent file, then invokes the registered `resolveSpawnModel` MCP tool
+ * via an in-memory client.
+ *
+ * Grep tag: "resolveSpawnModel escalates dev on rework only".
+ */
+async function runResolveSpawnModelEscalationMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  interface FixtureSpec {
+    name: string;
+    role: "dev" | "reviewer";
+    reworkCount: number;
+    /** Expected resolved model ID. */
+    expected: string;
+  }
+
+  const fixtures: FixtureSpec[] = [
+    {
+      name: "fresh-dev",
+      role: "dev",
+      reworkCount: 0,
+      expected: DEFAULT_DEV_MODEL,
+    },
+    {
+      name: "reworked-dev",
+      role: "dev",
+      reworkCount: 1,
+      expected: DEEP_MODEL,
+    },
+    {
+      name: "reworked-dev-multiple",
+      role: "dev",
+      reworkCount: 2,
+      expected: DEEP_MODEL,
+    },
+    {
+      name: "reworked-reviewer",
+      role: "reviewer",
+      reworkCount: 1,
+      expected: DEFAULT_REVIEWER_MODEL,
+    },
+  ];
+
+  for (const fx of fixtures) {
+    const tmp = await fs.mkdtemp(
+      path.join(os.tmpdir(), `sprint-orch-resolve-model-escalation-${fx.name}-`),
+    );
+    try {
+      // Real sprint-status.yaml fixture — one story with the chosen rework_count.
+      await fs.writeFile(
+        path.join(tmp, "sprint-status.yaml"),
+        [
+          "sprint_id: model-tiering-escalation-fixture",
+          "schema_version: 1",
+          "stories:",
+          "  - id: '1'",
+          "    title: fixture story",
+          "    status: in_progress",
+          "    depends_on: []",
+          "    acceptance_criteria:",
+          "      checks: []",
+          "    orchestrator:",
+          `      rework_count: ${fx.reworkCount}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      // Real .sprint-orchestrator/config.yaml. We deliberately do NOT set any
+      // models.<role> here so the static path falls through to frontmatter +
+      // fallback — the escalation branch must override that for dev>0 reworks.
+      const configDir = path.join(tmp, ".sprint-orchestrator");
+      await fs.mkdir(configDir, { recursive: true });
+      await fs.writeFile(
+        path.join(configDir, "config.yaml"),
+        ["sprintStatusPath: sprint-status.yaml", "layout: custom", "autoDetected: false", ""].join(
+          "\n",
+        ),
+        "utf8",
+      );
+
+      // Stub agent file with model: claude-sonnet-4-6 in frontmatter. For
+      // reworked-dev fixtures this proves the escalation branch wins over
+      // frontmatter; for reworked-reviewer it proves reviewer falls through
+      // to the static path and reads frontmatter as normal.
+      const agentsDir = path.join(tmp, "agents");
+      await fs.mkdir(agentsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(agentsDir, `${fx.role}.md`),
+        [
+          "---",
+          `name: ${fx.role}`,
+          `model: ${fx.role === "dev" ? DEFAULT_DEV_MODEL : DEFAULT_REVIEWER_MODEL}`,
+          "---",
+          "",
+          `stub ${fx.role} agent`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const ctx: ToolContext = {
+        projectRoot: tmp,
+        sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+        configPath: path.join(configDir, "config.yaml"),
+        agentsDir,
+      };
+      const server = buildServer(ctx);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client(
+        { name: "e2e-resolve-spawn-model-escalation", version: "0.0.1" },
+        { capabilities: {} },
+      );
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      let parsed: { model?: unknown; source?: unknown } = {};
+      try {
+        const result = (await client.callTool({
+          name: "resolveSpawnModel",
+          arguments: { storyId: "1", role: fx.role },
+        })) as { content?: Array<{ type: string; text?: string }> };
+        const textPart = result.content?.find((c) => c.type === "text");
+        if (textPart?.text) {
+          parsed = JSON.parse(textPart.text) as { model?: unknown; source?: unknown };
+        }
+      } finally {
+        await client.close();
+        await server.close();
+      }
+
+      await runOne({
+        name: `resolveSpawnModel escalates dev on rework only: ${fx.name} returns ${fx.expected} for role=${fx.role} rework_count=${fx.reworkCount}`,
+        run: () => {
+          expect(
+            typeof parsed.model === "string",
+            `expected resolveSpawnModel to return a string model, got ${JSON.stringify(parsed)}`,
+          );
+          expect(
+            parsed.model === fx.expected,
+            `expected model=${fx.expected} for fixture ${fx.name}, got ${JSON.stringify(parsed.model)} (source=${JSON.stringify(parsed.source)})`,
+          );
+        },
+      });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  }
 
   return outcomes;
 }

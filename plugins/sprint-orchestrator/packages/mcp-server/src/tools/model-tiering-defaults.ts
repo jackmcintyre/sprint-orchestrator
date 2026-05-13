@@ -20,6 +20,13 @@ export const SONNET_MODEL_ID = "claude-sonnet-4-6";
 /** Opus 4.7 — reserved for the rework-escalation branch in Story 2. */
 export const OPUS_MODEL_ID = "claude-opus-4-7";
 
+/**
+ * Model the resolver returns for a dev re-spawn after one or more rework
+ * swings. Locked by the model-tiering-v1 brief: "dev attempts after rework
+ * run on Opus." Reviewer is never escalated by this rule.
+ */
+export const DEEP_MODEL = "claude-opus-4-7";
+
 /** Fallback dev-role model used when neither config nor frontmatter set one. */
 export const DEFAULT_DEV_MODEL = SONNET_MODEL_ID;
 
