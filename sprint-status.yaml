@@ -79,11 +79,11 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-rse-2
       claimed_at: 2026-05-13T12:45:35.005Z
-      rework_count: 0
       completed_at: 2026-05-13T12:52:24.709Z
       summary: OSC 52 spike confirmed Claude Code strips terminal escapes; documented in follow-ups.md and
         wired SPRINT_ORCHESTRATOR_NO_CLIPBOARD as a no-op opt-out gate with e2e proving no escapes
         leak and /goal stays last line.
+      rework_count: 0
       artefacts:
         - git:718525aec5cc55e3e04e741c3d326be2fc0dd847
         - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts
@@ -130,7 +130,7 @@ stories:
         - README documentation is Story 3.
   - id: "3"
     title: README documents the new run-sprint output flow (last-line, fresh-context, clipboard auto-copy)
-    status: ready
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -141,7 +141,18 @@ stories:
             fresh-context and clipboard flow"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-rse-3
+      claimed_at: 2026-05-13T12:52:37.056Z
       rework_count: 0
+      completed_at: 2026-05-13T12:55:57.281Z
+      summary: Updated plugins/sprint-orchestrator/README.md "Running a sprint" section to document the
+        /goal final-line output, fresh-context rationale, and clipboard auto-copy deferral; added
+        readme-runsprint-phrases.ts lock module and an e2e mini-run.
+      artefacts:
+        - git:c886aa5a68d683f3c91b591a07e3353debb9a860
+        - plugins/sprint-orchestrator/README.md
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-runsprint-phrases.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: >
       PROBLEM: Stories 1 and 2 change the on-screen behaviour of run-sprint. The README must explain
       the new flow so users know to expect the /goal line on the last line, that it's in their
