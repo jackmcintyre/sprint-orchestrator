@@ -143,11 +143,11 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-rse-3
       claimed_at: 2026-05-13T12:52:37.056Z
-      rework_count: 0
       completed_at: 2026-05-13T12:55:57.281Z
       summary: Updated plugins/sprint-orchestrator/README.md "Running a sprint" section to document the
         /goal final-line output, fresh-context rationale, and clipboard auto-copy deferral; added
         readme-runsprint-phrases.ts lock module and an e2e mini-run.
+      rework_count: 0
       artefacts:
         - git:c886aa5a68d683f3c91b591a07e3353debb9a860
         - plugins/sprint-orchestrator/README.md
@@ -188,7 +188,7 @@ stories:
         - Editing other README sections (adopt, process-backlog) unless those edits are required to keep the "Running a sprint" section coherent.
   - id: "4"
     title: Ship gate — pnpm e2e + verify green
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
       - "2"
@@ -202,7 +202,17 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      rework_count: 0
+      claimed_by: dev-20260513-rse-4
+      claimed_at: 2026-05-13T12:56:13.839Z
+      rework_count: 1
+      last_review_feedback: "pnpm verify fails with 2 ESLint no-control-regex errors in
+        plugins/sprint-orchestrator/scripts/e2e.ts at lines 1938 and 2021 (OSC 52 regex patterns
+        introduced by story 2). E2E passes 78/78 but the ship gate is blocked by lint. Fix: add
+        targeted `// eslint-disable-next-line no-control-regex` comments at scripts/e2e.ts:1938 and
+        :2021 (or equivalent narrow fix that doesn't weaken the regex match — the control chars are
+        intentional for matching OSC 52 escape sequences). This is a one-line-per-site fix; do not
+        refactor the mini-run logic."
+      last_review_at: 2026-05-13T12:59:39.004Z
     notes: >
       Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
       cleanly and don't regress existing assertions.
