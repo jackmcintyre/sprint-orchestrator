@@ -1,18 +1,28 @@
 sprint_id: adopt-skill
 stories:
   - id: "1"
-    title: "/sprint-orchestrator:adopt skill with LLM drafter, user review, validate-and-write helper"
-    status: ready
+    title: /sprint-orchestrator:adopt skill with LLM drafter, user review, validate-and-write helper
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-adopt-1
+      claimed_at: 2026-05-13T11:56:26.663Z
       rework_count: 0
-    notes: |
+      completed_at: 2026-05-13T12:00:01.141Z
+      summary: Added /sprint-orchestrator:adopt skill and pure-TS validateAndWriteBacklog helper reusing
+        lintSprint + getOrInitConfig, with in-flight guard and atomic write.
+      artefacts:
+        - git:901e958b9660a35dfdff775a34a22f8c26fb7415
+        - plugins/sprint-orchestrator/skills/adopt/SKILL.md
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/adopt-write.ts
+    notes: >
       Build the universal source-agnostic adopt skill plus a pure-TS validate-and-write helper.
+
 
       Full BMad story spec:
         _bmad-output/implementation-artifacts/1-1-sprint-orchestrator-adopt-path-drafts-a-backlog-via-llm-subagent-pauses-for-user-review-validates-and-writes.md
@@ -41,20 +51,24 @@ stories:
       AC verification:
         - pnpm --dir plugins/sprint-orchestrator verify must pass (build + typecheck + lint + unit tests).
         - Behavioral correctness is verified by Story 2's deterministic e2e mini-run; Story 1's AC is the compile/lint gate only.
-
   - id: "2"
-    title: "Deterministic e2e coverage for adopt — validation refusal, in-flight refusal, golden-fixture happy path"
+    title: Deterministic e2e coverage for adopt — validation refusal, in-flight refusal, golden-fixture
+      happy path
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"adopt validation refusal in-flight refusal golden-fixture happy path\""
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "adopt validation refusal in-flight refusal
+            golden-fixture happy path"
           expect_exit: 0
     orchestrator:
       rework_count: 0
-    notes: |
-      Add a deterministic e2e mini-run for the adopt helper. The LLM drafting step is NOT covered by this story (explicit non-goal — testing live LLM output makes assertions flaky).
+    notes: >
+      Add a deterministic e2e mini-run for the adopt helper. The LLM drafting step is NOT covered by
+      this story (explicit non-goal — testing live LLM output makes assertions flaky).
+
 
       Full BMad story spec:
         _bmad-output/implementation-artifacts/1-2-deterministic-e2e-coverage-for-adopt-validation-refusal-in-flight-refusal-golden-fixture-happy-path.md
@@ -76,20 +90,25 @@ stories:
         - Prior mini-runs to mirror: runRunSprintWrapperMiniRun, runProcessBacklogEndOfRunSummaryLinesMiniRun (both in scripts/e2e.ts from prior sprints).
         - Use temp dirs for destinations.
         - Direct import of validateAndWriteBacklog from packages/mcp-server/src/tools/adopt-write.ts — do not invoke the skill body.
-
   - id: "3"
-    title: "README documents adopt as recommended entrypoint and names the in-plugin adaptor pattern"
+    title: README documents adopt as recommended entrypoint and names the in-plugin adaptor pattern
     status: ready
-    depends_on: ["1", "2"]
+    depends_on:
+      - "1"
+      - "2"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"README documents adopt and the in-plugin adaptor pattern\""
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "README documents adopt and the in-plugin
+            adaptor pattern"
           expect_exit: 0
     orchestrator:
       rework_count: 0
-    notes: |
-      Rewrite the README "Running a sprint" section to lead with adopt, name the adaptor pattern, and state the one-way coupling rule in prose. Lock the assertion phrases to a single source of truth.
+    notes: >
+      Rewrite the README "Running a sprint" section to lead with adopt, name the adaptor pattern,
+      and state the one-way coupling rule in prose. Lock the assertion phrases to a single source of
+      truth.
+
 
       Full BMad story spec:
         _bmad-output/implementation-artifacts/1-3-readme-documents-adopt-as-the-recommended-entrypoint-and-names-the-in-plugin-adaptor-pattern.md
@@ -117,25 +136,31 @@ stories:
       Out of scope:
         - Building any adaptor (e.g. bmad-to-orchestrator). README names the pattern only.
         - Authoring a separate schema doc. README may link to lintSprint as the schema source of truth.
-
   - id: "4"
-    title: "Ship gate — pnpm e2e + verify green"
+    title: Ship gate — pnpm e2e + verify green
     status: ready
-    depends_on: ["1", "2", "3"]
+    depends_on:
+      - "1"
+      - "2"
+      - "3"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator e2e"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e
           expect_exit: 0
         - type: shell
-          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
       rework_count: 0
-    notes: |
-      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate cleanly and don't regress existing assertions.
+    notes: >
+      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
+      cleanly and don't regress existing assertions.
 
-      If this fails, the reviewer should rework the offending prior story, not record this one as failed.
+
+      If this fails, the reviewer should rework the offending prior story, not record this one as
+      failed.
+
 
       Full BMad story spec:
         _bmad-output/implementation-artifacts/1-4-ship-gate-pnpm-e2e-verify-green.md
