@@ -21,10 +21,45 @@ On first run in a project, the plugin asks where your planning docs live (or det
 
 ## Running a sprint
 
-The recommended entrypoint is the `run-sprint` wrapper. It reads
-`sprint-status.yaml`, computes a turn cap from the story count, and hands
-the drain condition to `/goal` so the orchestrator keeps swinging until
-the backlog is fully resolved (or it hits the cap):
+### Step 1 — Get a backlog into the orchestrator
+
+When you have any external planning context (an epic doc, a brief, a stack
+of story files, meeting notes), the recommended entrypoint is the adopt
+skill:
+
+```
+/sprint-orchestrator:adopt <path>
+```
+
+The flow is universal: source → an LLM subagent drafts a conforming
+backlog → you review (accept / edit / abort) → on accept, `lintSprint`
+validates the draft → write to `sprint-status.yaml`. The skill never
+writes without your acceptance, and never writes a draft that doesn't
+pass `lintSprint`.
+
+#### Adaptor pattern (extension point)
+
+For producer-specific fast paths — when a planning tool emits structured
+output and you'd rather skip the LLM drafting step — the orchestrator
+exposes an in-plugin **adaptor pattern**. An adaptor is a small, in-plugin
+module that converts producer-native output into a conforming backlog and
+hands it to the same validate-and-write path adopt uses.
+
+BMad is one example; the pattern works for any producer that can emit a conforming backlog.
+The one-way-coupling rule is strict: The orchestrator core does not import adaptors; adaptors depend on the schema, not the other way round.
+This keeps the core ignorant of any specific producer and lets adaptors
+come and go without churning the state machine. `lintSprint` is the
+schema source of truth — any adaptor's output must pass it.
+
+No adaptors ship in this sprint; the pattern is documented for future extension.
+
+### Step 2 — Run the sprint
+
+Once `sprint-status.yaml` exists, the recommended entrypoint is the
+`run-sprint` wrapper. It reads `sprint-status.yaml`, computes a turn cap
+from the story count, and hands the drain condition to `/goal` so the
+orchestrator keeps swinging until the backlog is fully resolved (or it
+hits the cap):
 
 ```
 /sprint-orchestrator:run-sprint

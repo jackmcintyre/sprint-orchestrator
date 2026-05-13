@@ -31,6 +31,7 @@ import { prepareStoryBranch } from "../packages/mcp-server/src/tools/prepare-sto
 import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story-reopen.js";
 import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
 import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
+import { validateAndWriteBacklog } from "../packages/mcp-server/src/tools/adopt-write.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
 import {
   countTerminalOutcomes,
@@ -38,6 +39,13 @@ import {
   formatCapStopLine,
   formatDrainLine,
 } from "../packages/mcp-server/src/tools/format-end-of-run-line.js";
+import {
+  ADAPTOR_PATTERN_PHRASE,
+  ADOPT_COMMAND,
+  NO_ADAPTORS_SHIP_STATEMENT,
+  ONE_WAY_COUPLING_STATEMENT,
+  PRODUCER_EXAMPLE_FRAMING,
+} from "../packages/mcp-server/src/tools/readme-adopt-phrases.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -2104,6 +2112,300 @@ async function runReadmeDocumentsRunSprintEntrypointMiniRun(): Promise<Assertion
   return outcomes;
 }
 
+/**
+ * Story 1.3 — README documents adopt as the recommended entrypoint and
+ * names the in-plugin adaptor pattern.
+ *
+ * Reads the README, isolates the "Running a sprint" section, and asserts
+ * the four AC5 properties against the locked phrases exported from
+ * `readme-adopt-phrases.ts`. The constants module is the single source
+ * of truth so the README and the assertions can't drift.
+ */
+async function runReadmeDocumentsAdoptAndAdaptorPatternMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const readmePath = path.resolve(HERE, "..", "README.md");
+  let readme = "";
+  try {
+    readme = await fs.readFile(readmePath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "README documents adopt and the in-plugin adaptor pattern: file readable",
+      passed: false,
+      error: `could not read README at ${readmePath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  // Same scoping rule as the sibling mini-run: the "Running a sprint"
+  // section runs from its heading to the next top-level heading.
+  function extractRunningSection(text: string): string | null {
+    const m = text.match(/\n##\s+Running a sprint\b[\s\S]*?(?=\n##\s+|\n?$)/);
+    return m ? m[0] : null;
+  }
+
+  const section = extractRunningSection(readme);
+
+  const checks: Assertion[] = [
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: running-a-sprint section exists",
+      run: () => {
+        expect(section !== null, "README is missing the '## Running a sprint' section");
+      },
+    },
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: adopt command is present in the section",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(ADOPT_COMMAND),
+          `Running-a-sprint section does not mention ${ADOPT_COMMAND}`,
+        );
+      },
+    },
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: adaptor pattern is named in the section",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(ADAPTOR_PATTERN_PHRASE),
+          `Running-a-sprint section does not name the '${ADAPTOR_PATTERN_PHRASE}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: one-way-coupling statement is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(ONE_WAY_COUPLING_STATEMENT),
+          `Running-a-sprint section does not contain the one-way-coupling statement verbatim. Expected: '${ONE_WAY_COUPLING_STATEMENT}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: BMad-as-example framing is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(PRODUCER_EXAMPLE_FRAMING),
+          `Running-a-sprint section does not contain the producer-example framing verbatim. Expected: '${PRODUCER_EXAMPLE_FRAMING}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: no-adaptors-ship disclaimer is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(NO_ADAPTORS_SHIP_STATEMENT),
+          `Running-a-sprint section does not contain the no-adaptors-ship disclaimer verbatim. Expected: '${NO_ADAPTORS_SHIP_STATEMENT}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: adopt is introduced before run-sprint in the section",
+      run: () => {
+        if (!section) return;
+        const adoptIdx = section.indexOf(ADOPT_COMMAND);
+        const runSprintIdx = section.indexOf("/sprint-orchestrator:run-sprint");
+        expect(
+          adoptIdx >= 0 && runSprintIdx >= 0,
+          `Running-a-sprint section must mention both ${ADOPT_COMMAND} (idx=${adoptIdx}) and /sprint-orchestrator:run-sprint (idx=${runSprintIdx})`,
+        );
+        expect(
+          adoptIdx < runSprintIdx,
+          `${ADOPT_COMMAND} must appear before /sprint-orchestrator:run-sprint in the Running-a-sprint section (adopt at ${adoptIdx}, run-sprint at ${runSprintIdx})`,
+        );
+      },
+    },
+    {
+      name: "README documents adopt and the in-plugin adaptor pattern: run-sprint + cap-formula content is preserved",
+      run: () => {
+        // Guard against accidental deletion of the prior sprint's content.
+        // The cap formula and the three end-of-run summary prefixes must
+        // still be present after the adopt + adaptor-pattern prepend.
+        expect(
+          /ceil\(\s*story_count\s*\*\s*turn_cap_per_story\s*\)/.test(readme),
+          "README no longer documents the cap formula 'ceil(story_count * turn_cap_per_story)' — adopt edits must not delete prior sprint content",
+        );
+        expect(
+          readme.includes("Sprint drain confirmed:") &&
+            readme.includes("Sprint paused at hard cap:") &&
+            readme.includes("Sprint blocked:"),
+          "README no longer documents all three end-of-run summary prefixes — adopt edits must not delete prior sprint content",
+        );
+      },
+    },
+  ];
+
+  for (const a of checks) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  return outcomes;
+}
+
+/**
+ * Story 1.2 — deterministic e2e coverage for the adopt validate-and-write path.
+ *
+ * Exercises `validateAndWriteBacklog` directly (the LLM drafting step is an
+ * explicit non-goal — testing live model output would make assertions flaky).
+ *
+ * Three variants, against golden YAML fixtures under
+ * `scripts/fixtures/adopt/`:
+ *
+ *   (a) Happy path: valid proposal + empty dest -> ok: true, dest matches
+ *       the fixture byte-for-byte.
+ *   (b) Invalid proposal: pre-written dest, invalid proposal -> ok: false,
+ *       reason contains the verbatim lint/parse error, dest byte-identical
+ *       before vs after.
+ *   (c) In-flight refusal: dest already contains an in_progress story,
+ *       valid proposal with force=false -> ok: false, reason names the
+ *       in-flight story id, dest byte-identical before vs after.
+ */
+async function runAdoptValidateAndWriteMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const FIXTURE_DIR = path.resolve(HERE, "fixtures", "adopt");
+  const validFixturePath = path.join(FIXTURE_DIR, "valid-proposal.yaml");
+  const invalidFixturePath = path.join(FIXTURE_DIR, "invalid-proposal.yaml");
+  const inFlightFixturePath = path.join(FIXTURE_DIR, "in-flight-existing.yaml");
+
+  const validProposal = await fs.readFile(validFixturePath, "utf8");
+  const invalidProposal = await fs.readFile(invalidFixturePath, "utf8");
+  const inFlightExisting = await fs.readFile(inFlightFixturePath, "utf8");
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  // Variant (a): happy path — valid proposal, empty dest.
+  const tmpA = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-adopt-happy-"));
+  try {
+    const destPath = path.join(tmpA, "sprint-status.yaml");
+    const result = await validateAndWriteBacklog({
+      proposalYaml: validProposal,
+      destPath,
+      existingYaml: null,
+      force: false,
+    });
+    const written = existsSync(destPath) ? await fs.readFile(destPath, "utf8") : "";
+
+    await runOne({
+      name: "adopt validation refusal in-flight refusal golden-fixture happy path: happy path writes the proposal byte-for-byte",
+      run: () => {
+        expect(result.ok === true, `expected ok=true, got ${JSON.stringify(result)}`);
+        expect(
+          written === validProposal,
+          `expected destination contents to equal valid-proposal.yaml byte-for-byte; got length ${written.length} vs ${validProposal.length}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmpA, { recursive: true, force: true });
+  }
+
+  // Variant (b): invalid proposal — pre-existing dest must be byte-identical
+  // before and after. The pre-existing content is the in-flight fixture
+  // (any content works; we re-use a fixture rather than invent more data).
+  const tmpB = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-adopt-invalid-"));
+  try {
+    const destPath = path.join(tmpB, "sprint-status.yaml");
+    const preExisting = inFlightExisting;
+    await fs.writeFile(destPath, preExisting, "utf8");
+    const before = await fs.readFile(destPath);
+
+    const result = await validateAndWriteBacklog({
+      proposalYaml: invalidProposal,
+      destPath,
+      // Pass `null` for existingYaml so the in-flight gate doesn't fire —
+      // we want this variant to fail strictly on the lint gate, isolating
+      // AC 3 from AC 4.
+      existingYaml: null,
+      force: false,
+    });
+    const after = await fs.readFile(destPath);
+
+    await runOne({
+      name: "adopt validation refusal in-flight refusal golden-fixture happy path: invalid proposal is refused and the existing dest is byte-identical",
+      run: () => {
+        expect(result.ok === false, `expected ok=false, got ${JSON.stringify(result)}`);
+        if (result.ok !== false) return;
+        expect(
+          /proposal failed/.test(result.reason),
+          `expected reason to start with 'proposal failed', got: ${result.reason}`,
+        );
+        expect(
+          before.equals(after),
+          `expected destination file to be byte-identical before and after refusal; before.length=${before.length} after.length=${after.length}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmpB, { recursive: true, force: true });
+  }
+
+  // Variant (c): in-flight refusal — pre-existing dest has an in_progress
+  // story; valid proposal with force=false must be refused without touching
+  // the destination.
+  const tmpC = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-adopt-inflight-"));
+  try {
+    const destPath = path.join(tmpC, "sprint-status.yaml");
+    await fs.writeFile(destPath, inFlightExisting, "utf8");
+    const before = await fs.readFile(destPath);
+
+    const result = await validateAndWriteBacklog({
+      proposalYaml: validProposal,
+      destPath,
+      existingYaml: inFlightExisting,
+      force: false,
+    });
+    const after = await fs.readFile(destPath);
+
+    await runOne({
+      name: "adopt validation refusal in-flight refusal golden-fixture happy path: in-flight refusal names the story id and leaves dest unchanged",
+      run: () => {
+        expect(result.ok === false, `expected ok=false, got ${JSON.stringify(result)}`);
+        if (result.ok !== false) return;
+        expect(
+          result.reason.includes("INFLIGHT1"),
+          `expected reason to name in-flight story id 'INFLIGHT1', got: ${result.reason}`,
+        );
+        expect(
+          result.reason.includes("in_progress"),
+          `expected reason to mention 'in_progress', got: ${result.reason}`,
+        );
+        expect(
+          before.equals(after),
+          `expected destination file to be byte-identical before and after refusal; before.length=${before.length} after.length=${after.length}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmpC, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -2258,6 +2560,14 @@ async function main(): Promise<number> {
     outcomes.push(...readmeOutcomes);
   }
 
+  // Twelfth mini-run (story 1.3): README documents adopt as recommended
+  // entrypoint and names the in-plugin adaptor pattern.
+  if (!filter || filter.test("README documents adopt and the in-plugin adaptor pattern")) {
+    console.log("[e2e] mini-run: README documents adopt and the adaptor pattern");
+    const readmeAdoptOutcomes = await runReadmeDocumentsAdoptAndAdaptorPatternMiniRun();
+    outcomes.push(...readmeAdoptOutcomes);
+  }
+
   // Tenth mini-run (story 2): process-backlog end-of-run summary contract.
   // Three distinct final lines (drain / cap-stop / blocked) so the /goal
   // evaluator can disambiguate run outcomes from the transcript.
@@ -2270,6 +2580,17 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: process-backlog end-of-run summary lines");
     const eorOutcomes = await runProcessBacklogEndOfRunSummaryLinesMiniRun();
     outcomes.push(...eorOutcomes);
+  }
+
+  // Twelfth mini-run (story 1.2): deterministic adopt validate-and-write
+  // coverage — happy path, invalid proposal refusal, in-flight refusal.
+  if (
+    !filter ||
+    filter.test("adopt validation refusal in-flight refusal golden-fixture happy path")
+  ) {
+    console.log("[e2e] mini-run: adopt validate-and-write (happy / invalid / in-flight)");
+    const adoptOutcomes = await runAdoptValidateAndWriteMiniRun();
+    outcomes.push(...adoptOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);
