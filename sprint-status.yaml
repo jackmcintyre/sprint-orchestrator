@@ -81,7 +81,7 @@ stories:
       (works even if the state file was authored without ready stories).
   - id: "3"
     title: Shield reviewer and dev subagents from user-global Claude preferences
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -97,6 +97,14 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix-3
       claimed_at: 2026-05-13T00:39:19.990Z
+      completed_at: 2026-05-13T00:41:25.815Z
+      summary: Added explicit override notes to reviewer.md and dev.md clarifying that orchestrator mark*
+        tool calls are state-machine actions immune to user-global CLAUDE.md "never say done"
+        preferences.
+      artefacts:
+        - git:ccd36ed872ef428ad196e44f7da49af173e0581b
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/agents/dev.md
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/agents/reviewer.md
     notes: |
       User-global ~/.claude/CLAUDE.md preferences (e.g. "never tell me something is done")
       leak into orchestrator subagents and silently break their core job - calling
