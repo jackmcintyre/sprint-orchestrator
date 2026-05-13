@@ -207,7 +207,7 @@ stories:
       Acceptance: reviewer.md contains the phrase "include the tool result" (or equivalent).
   - id: "6"
     title: README docs for AC-writing guidance and out-of-band edit caveat
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -223,6 +223,12 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix-6
       claimed_at: 2026-05-13T00:48:54.022Z
+      completed_at: 2026-05-13T00:50:56.606Z
+      summary: Added README sections covering acceptance-criteria authoring guidance and the run.log gap
+        caused by hand-editing sprint-status.yaml.
+      artefacts:
+        - git:a73c32e76c7564dd1ca010c6dc96743c395e0b47
+        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/README.md
     notes: |
       Two small README additions covering issues #7 and #8 from the dry-run findings.
 
