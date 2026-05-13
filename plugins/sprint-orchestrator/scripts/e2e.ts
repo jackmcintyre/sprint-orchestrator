@@ -1935,6 +1935,7 @@ async function runRunSprintOsc52ClipboardMiniRun(): Promise<AssertionOutcome[]> 
   // substring matching this shape (with at least one base64 character) in
   // the production output, given the spike failed and the emit branch is
   // dead code today.
+  // eslint-disable-next-line no-control-regex
   const OSC52_RE = /\x1b\]52;c;[A-Za-z0-9+/=]+\x07/;
 
   const turnCaps = [1, 9, 42];
@@ -2018,6 +2019,7 @@ async function runRunSprintOsc52ClipboardMiniRun(): Promise<AssertionOutcome[]> 
       name: "run-sprint emits OSC 52 clipboard sequence for goal command with opt-out",
       run: () => {
         const frame = buildClipboardEscape(payload);
+        // eslint-disable-next-line no-control-regex
         const m = frame.match(/^\x1b\]52;c;([A-Za-z0-9+/=]+)\x07$/);
         expect(m !== null, `expected OSC 52 frame shape, got: ${JSON.stringify(frame)}`);
         if (!m) return;
