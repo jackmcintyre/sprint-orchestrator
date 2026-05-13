@@ -17,19 +17,74 @@ Install the plugin into Claude Code from this repo's marketplace:
 /plugin install sprint-orchestrator
 ```
 
-Then drive the backlog from inside Claude Code:
+On first run in a project, the plugin asks where your planning docs live (or detects BMAD v6 layout automatically) and writes `.sprint-orchestrator/config.yaml`.
+
+## Running a sprint
+
+The recommended entrypoint is the `run-sprint` wrapper. It reads
+`sprint-status.yaml`, computes a turn cap from the story count, and hands
+the drain condition to `/goal` so the orchestrator keeps swinging until
+the backlog is fully resolved (or it hits the cap):
 
 ```
-/sprint-orchestrator:process-backlog
+/sprint-orchestrator:run-sprint
 ```
 
-To keep the orchestrator running on an interval (claiming and routing ready stories without manual nudging), wrap it in `/loop`:
+### Computed turn cap
+
+The wrapper computes the cap as:
+
+```
+cap = ceil(story_count * turn_cap_per_story)
+```
+
+`turn_cap_per_story` defaults to **3** and can be overridden in
+`.sprint-orchestrator/config.yaml`:
+
+```yaml
+turn_cap_per_story: 5
+```
+
+So a 7-story sprint with the default cap will run for at most
+`ceil(7 * 3) = 21` turns before pausing.
+
+### Manual override: raw /goal
+
+If you want to set the drain condition yourself (different cap, extra
+predicate, debugging a misbehaving wrapper), invoke `/goal` directly. The
+canonical condition string is:
+
+```
+/goal /sprint-orchestrator:process-backlog UNTIL every story in sprint-status.yaml is status=done or status=failed, OR stop after <N> turns
+```
+
+Copy that verbatim and adjust `<N>` for your sprint size.
+
+### Fallback: /loop
+
+If `/goal` misbehaves (rare), you can fall back to a fixed-interval loop:
 
 ```
 /loop 5m /sprint-orchestrator:process-backlog
 ```
 
-On first run in a project, the plugin asks where your planning docs live (or detects BMAD v6 layout automatically) and writes `.sprint-orchestrator/config.yaml`.
+This is a fallback, not the primary path — `/goal` reads the end-of-run
+summary line (below) to decide whether to keep going, while `/loop` just
+re-fires on a timer regardless of outcome.
+
+### End-of-run summary lines
+
+Every `process-backlog` run prints one of three distinct final lines so
+the `/goal` evaluator (and you, watching the transcript) can tell drain
+from cap-stop from blocked:
+
+- `Sprint drain confirmed: 0 ready stories remaining. Outcome: <D> done, <F> failed.`
+- `Sprint paused at hard cap: <R> ready stories remaining. Outcome so far: <D> done, <F> failed.`
+- `Sprint blocked: <reason>. <R> ready stories remaining.`
+
+The leading tokens (`Sprint drain confirmed:`, `Sprint paused at hard cap:`,
+`Sprint blocked:`) are stable contracts — grep-by-prefix to disambiguate
+outcomes in transcripts or tooling.
 
 ## Install from source
 

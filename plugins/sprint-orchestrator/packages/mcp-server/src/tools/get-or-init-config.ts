@@ -38,11 +38,24 @@ export interface OrchestratorConfig {
    * through the config but no consumer reads it yet. Story 2 wires it in.
    */
   default_base?: string;
+  /**
+   * Per-story budget the `run-sprint` wrapper skill uses when computing the
+   * `/goal` turn cap (turn_cap = ceil(N_stories * turn_cap_per_story)).
+   * Defaults to 3, which matches the per-story worst-case under the current
+   * rework cap of 2 (dev + reviewer + one rework dev + reviewer rounded up).
+   *
+   * Read by the wrapper skill only — the orchestrator core does not consume
+   * this field. Kept here so it round-trips through writeConfig and surfaces
+   * alongside other tuning knobs.
+   */
+  turn_cap_per_story?: number;
 }
 
 /** Defaults applied when a config omits the new pr-per-story fields. */
 const DEFAULT_PR_PER_STORY = false;
 const DEFAULT_BASE_BRANCH = "main";
+/** Default per-story turn budget used by the run-sprint wrapper skill. */
+export const DEFAULT_TURN_CAP_PER_STORY = 3;
 
 function withPrPerStoryDefaults(config: OrchestratorConfig): OrchestratorConfig {
   return {

@@ -23,7 +23,7 @@ You orchestrate sprint execution. You do not implement stories yourself and you 
 
 Repeat until either `getReadyStories` returns `[]` or you have completed **5 stories this run** (hard cap to protect context):
 
-1. Call `getReadyStories`. If empty, write a one-line summary of what was done across the run and stop.
+1. Call `getReadyStories`. If empty, emit the drain end-of-run line (see **End-of-run summary contract** below) and stop.
 2. Pick the first ready story `S`. Generate a fresh agent ID: `dev-<session-id-or-timestamp>`.
 3. Call `claimStory` with `S.id` and that agent ID. If `claimed` is false (another orchestrator beat you to it), skip to the next ready story.
 4. Call `prepareStoryBranch` with `S.id` and the same agent ID. When `pr_per_story` is enabled in config (off by default while the per-story workflow is still in progress — opt in explicitly to test it), this creates and checks out a per-story branch from `default_base` so the dev's commits land on it; when disabled, it returns `{ branch: null, skipped: true }` and you proceed unchanged. If it returns `{ branch: null, skipped: true, reason: "default_base-stale", message }`, the configured `default_base` lags behind on the orchestrator schema. **Surface the `message` to the user and STOP this run** — do NOT silently fall back to shared-branch mode (that hides the misconfiguration and pollutes every PR with hundreds of lines of unrelated diff). The user must either rebase `default_base` onto their invocation branch or update `default_base` in `.sprint-orchestrator/config.yaml` before re-invoking.
@@ -43,6 +43,48 @@ Repeat until either `getReadyStories` returns `[]` or you have completed **5 sto
 - Do not call `recordStorySuccess` or `recordStoryFailure` directly. You don't have permission and shouldn't try.
 - If you see stale claims (stories stuck in `in_progress` from a prior crashed run), the user can call `releaseStaleClaims` themselves — do not call it automatically unless the config has `force_release_stale` set (see Setup step 2).
 - Never narrate intermediate work. One status line per story is enough.
+
+## End-of-run summary contract
+
+The very last line you print at end of run MUST match one of the three
+shapes below, exactly. These lines are the contract with the `/goal`
+evaluator (a Haiku-class model reading the transcript) — it uses them
+to disambiguate a clean drain from a hard-cap pause from a blocked
+stop. Future narrative around the line is fine; the line grammar is
+fixed. Do NOT paraphrase.
+
+A reference implementation of the three formatters lives in
+`packages/mcp-server/src/tools/format-end-of-run-line.ts`
+(`formatDrainLine`, `formatCapStopLine`, `formatBlockedLine`, plus
+`countTerminalOutcomes` for the done/failed tally). The e2e harness
+imports those formatters directly, so the asserted output and the
+documented contract are the same string by construction.
+
+1. **Drain** — main loop exited because `getReadyStories` returned `[]`.
+   Compute `D` = count of stories with `status: done` in
+   `sprint-status.yaml`, `F` = count with `status: failed`. Print
+   exactly:
+
+   ```
+   Sprint drain confirmed: 0 ready stories remaining. Outcome: <D> done, <F> failed.
+   ```
+
+2. **Cap-stop** — main loop exited because the 5-story hard cap was
+   hit (not drain). Let `K` = current `getReadyStories` count, `D`/`F`
+   as above. Print exactly:
+
+   ```
+   Sprint paused at hard cap: <K> ready stories remaining. Outcome so far: <D> done, <F> failed.
+   ```
+
+3. **Blocked** — reviewer returned `blocked: <id> — <reason>` and you
+   are hard-stopping the run (see step 7 above). Let `<reason>` be the
+   verbatim tail from the reviewer's blocked line, `K` the current
+   ready count. Print exactly:
+
+   ```
+   Sprint blocked: <reason>. <K> ready stories remaining.
+   ```
 
 ## Sprint authoring rule: every sprint MUST end with a ship gate
 
