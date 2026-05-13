@@ -12,11 +12,11 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-bmad-1
       claimed_at: 2026-05-13T13:16:16.812Z
-      rework_count: 0
       completed_at: 2026-05-13T13:40:46.275Z
       summary: Shipped deterministic /sprint-orchestrator:adapt-bmad skill plus pure adaptBmadOutput
         helper that converts BMad epics + story Verification sections into a conforming
         sprint-status.yaml.
+      rework_count: 0
       artefacts:
         - git:870c27e4e9db88275ab3db7449c0d8ba50eb53d8
         - plugins/sprint-orchestrator/packages/mcp-server/src/tools/adapt-bmad.ts
@@ -82,7 +82,7 @@ stories:
   - id: "2"
     title: Deterministic e2e coverage for adapt-bmad — happy path, missing Verification refusal,
       malformed input refusal
-    status: ready
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -92,7 +92,16 @@ stories:
             refusal malformed refusal"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-bmad-2
+      claimed_at: 2026-05-13T13:40:58.795Z
       rework_count: 0
+      completed_at: 2026-05-13T13:46:44.225Z
+      summary: Added adapt-bmad e2e mini-run with happy/missing-verification/malformed fixtures locking in
+        adaptor behaviour.
+      artefacts:
+        - git:ee86e8505a61fe8dd5aab5eff3ce03b7ccbca698
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/scripts/fixtures/adapt-bmad/
     notes: >
       PROBLEM: Story 1 ships the deterministic adaptor. Story 2 locks the behaviour with e2e
       assertions that exercise the helper directly (not the skill body — same approach we used for
