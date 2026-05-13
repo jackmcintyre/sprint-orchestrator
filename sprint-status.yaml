@@ -97,10 +97,10 @@ stories:
     orchestrator:
       claimed_by: dev-20260513-2
       claimed_at: 2026-05-13T10:49:33.660Z
-      rework_count: 0
       completed_at: 2026-05-13T10:53:54.151Z
       summary: Codified three distinct end-of-run summary lines (drain / cap-stop / blocked) in
         process-backlog SKILL.md and added e2e mini-runs asserting each line shape.
+      rework_count: 0
       artefacts:
         - git:c9c65d74700cbedcdc7a3a98799cbaff645e0996
         - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
@@ -184,7 +184,7 @@ stories:
       output vs new wrapper skill).
   - id: "3"
     title: README documents /sprint-orchestrator:run-sprint as recommended entrypoint
-    status: ready
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -195,7 +195,17 @@ stories:
             turn cap and end-of-run summary lines"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-20260513-3
+      claimed_at: 2026-05-13T10:54:04.344Z
       rework_count: 0
+      completed_at: 2026-05-13T10:56:52.043Z
+      summary: README's Running-a-sprint section now leads with /sprint-orchestrator:run-sprint, documents
+        the computed turn cap formula, raw /goal manual override, /loop fallback, and the three
+        end-of-run summary line shapes; new e2e assertions cover all of this.
+      artefacts:
+        - git:054ac6428d3e932be3eafdb883612aca0b197d7d
+        - plugins/sprint-orchestrator/README.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: |
       PROBLEM: even with the wrapper skill and tightened summary
       lines in place, the README still tells users to run
