@@ -1,227 +1,148 @@
-sprint_id: runsprint-ergonomics
+sprint_id: bmad-adaptor
 stories:
   - id: "1"
-    title: run-sprint /goal command is single-line, last-line of output, with fresh-context-window
-      guidance, locked in a constants module
-    status: done
+    title: "/sprint-orchestrator:adapt-bmad — deterministic BMad → orchestrator adaptor skill + pure helper"
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint emits goal on guaranteed last
-            line with fresh-context guidance"
+          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-rse-1
-      claimed_at: 2026-05-13T12:41:04.405Z
-      completed_at: 2026-05-13T12:45:08.673Z
-      summary: "Locked run-sprint final output: fresh-context guidance + canonical /goal command as the
-        last two lines, defined in a new constants module and asserted by e2e."
       rework_count: 0
-      artefacts:
-        - git:70d8cbaeb324edb7535523ffdc325a08f2263fc6
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts
-        - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-    notes: >
-      PROBLEM: today /sprint-orchestrator:run-sprint computes the turn cap and prints the canonical
-      /goal command, but the printed line is buried in surrounding narrative — making it fiddly to
-      select and copy. The Claude Code harness does NOT allow a skill to fire a slash command
-      directly (confirmed by spike via claude-code-guide agent on 2026-05-13). So copy-paste is here
-      to stay; the win is making it trivial.
+    notes: |
+      PROBLEM: today the only way into the orchestrator from BMad-authored stories is the universal /sprint-orchestrator:adopt skill (LLM-mediated, source-agnostic, requires user review). For BMad — a producer we use daily — we want a faster, deterministic fast path that validates the adaptor pattern we documented in the prior sprint.
 
+      DECISION: ship a separate skill /sprint-orchestrator:adapt-bmad <bmad-output-dir> that reads BMad's epic doc + per-story .md files and produces a conforming sprint-status.yaml deterministically. No LLM step. Universal /adopt stays producer-agnostic; adapt-bmad is the producer-named fast path.
 
-      DECISION: structure run-sprint's output so the /goal command is (a) on a single line (no
-      soft-wrapping), (b) the literal final line of stdout (nothing trailing it), and (c) preceded
-      by a one-line user-facing note advising paste in a fresh context window. All three locked in a
-      constants module so the e2e and the skill cannot drift.
+      BMAD-SIDE CONVENTION (defines the schema this adaptor consumes):
+        - Each BMad story file in the implementation-artifacts dir must contain a "## Verification" section. The section contains one or more shell commands the orchestrator should run to verify the story's AC, in the format:
+            ```
+            ## Verification
 
+            ```shell
+            pnpm --dir plugins/sprint-orchestrator e2e --grep "<grep-tag>"
+            ```
+            ```
+        - Each fenced shell block becomes one `type: shell` check in the orchestrator's acceptance_criteria.
+        - Exit code is implicit: 0 for success (typical case). To assert a non-zero exit, the convention is a comment line `# expect_exit: <N>` inside the fence (uncommon; covered by the spec but not the goldens this sprint).
+        - If a story file lacks the Verification section, the adaptor refuses with a clear message naming the story file. No defaults; we want authoring discipline, not silent fallback.
 
-      BEHAVIOUR (locked format — exact strings to be defined as constants in the new module):
-        - Second-to-last line of output: "Paste this in a fresh context window for the cleanest run:" (or equivalent — final wording is the dev's call as long as the constants module and the e2e assertion agree).
-        - Last line of output: the canonical "/goal /sprint-orchestrator:process-backlog UNTIL every story in sprint-status.yaml is status=done or status=failed, OR stop after <N> turns" — single line, no wrap.
-        - Absolutely nothing printed AFTER the /goal line. No summary, no trailing whitespace beyond a single \n.
-        - The two locked lines should be separated from any preceding narrative by a blank line so they visually stand out.
-
-      WHY FRESH-CONTEXT-WINDOW MATTERS:
-        - Normalises copy-paste as a deliberate, beneficial action (not a chore).
-        - A fresh context window gives /goal a clean transcript to evaluate the drain condition against — no prior conversation noise.
+      ADAPTOR BEHAVIOUR:
+        - Reads BMad's epic doc at <bmad-output-dir>/planning-artifacts/epics.md to extract the story sequence (epic.story IDs and titles).
+        - Reads each BMad story file at <bmad-output-dir>/implementation-artifacts/<story-key>.md.
+        - Extracts the Verification section's shell command(s) into acceptance_criteria.checks.
+        - Sequential dependencies inferred from BMad story order: story 1-2 depends_on 1-1, 1-3 depends_on 1-2, etc. (Future enhancement: explicit dependency declarations in BMad story frontmatter. Out of scope this sprint.)
+        - Story id format: orchestrator-friendly sequential integers ("1", "2", "3", ...) regardless of BMad's "1.1" / "1.2" epic.story numbering. The BMad ID is preserved in the notes field for traceability.
+        - The notes field is populated with a short pointer to the BMad story file path; the dev/reviewer can read it for full context (no need to inline the entire BMad spec).
+        - Output: a conforming sprint-status.yaml that passes lintSprint. The adaptor writes via the same atomic helper used by /adopt (reuse validateAndWriteBacklog from packages/mcp-server/src/tools/adopt-write.ts).
 
       FILES TO TOUCH:
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts (NEW)
-            * Mirrors the format-end-of-run-line.ts and readme-adopt-phrases.ts patterns from prior sprints.
-            * Exports: FRESH_CONTEXT_GUIDANCE_LINE (constant string), formatGoalCommandLine(turnCap: number) (function), buildRunSprintFinalOutput(turnCap: number) (assembles the last-two-lines block).
-        - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
-            * Restructure output so buildRunSprintFinalOutput() is the literal final block printed.
-            * Any prior summary/narrative content moves ABOVE the blank-line separator.
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-            * New mini-run runRunSprintGoalLastLineMiniRun() behind grep tag "run-sprint emits goal on guaranteed last line with fresh-context guidance".
-            * Imports planRunSprint() (existing module from the goal-adoption sprint) and the new buildRunSprintFinalOutput().
-            * Asserts: (a) buildRunSprintFinalOutput(N) ends with the canonical /goal line for N, (b) the /goal line contains no embedded newlines, (c) the second-to-last non-empty line is the fresh-context guidance string, (d) nothing follows the /goal line except at most one trailing newline.
+        - plugins/sprint-orchestrator/skills/adapt-bmad/SKILL.md (NEW)
+            * Argument: <bmad-output-dir> (required, defaults to "_bmad-output" if conventional).
+            * Optional: --force (passed through to validateAndWriteBacklog).
+            * No LLM subagent. No user review step (deterministic — what you put in is what you get).
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/adapt-bmad.ts (NEW)
+            * export adaptBmadOutput({ bmadOutputDir }): { ok: true, proposalYaml } | { ok: false, reason }
+            * Pure function — directly testable from scripts/e2e.ts (no implicit globals, no file writes).
+            * Parses BMad epic doc + story files. Refuses on missing Verification section, missing epic doc, missing story file, or malformed shell fences.
+        - plugins/sprint-orchestrator/skills/adapt-bmad/SKILL.md should call adaptBmadOutput() to produce the YAML, then hand off to validateAndWriteBacklog from adopt-write.ts for the actual schema validation + atomic write.
 
-      EXISTING SURFACES TO REUSE:
-        - planRunSprint() at plugins/sprint-orchestrator/packages/mcp-server/src/tools/plan-run-sprint.ts already computes the turn cap and produces the /goal command string. Wrap or extend; do not duplicate.
+      COUPLING DISCIPLINE:
+        - Orchestrator core (MCP server, state machine, process-backlog skill) MUST NOT import adapt-bmad.ts or anything from skills/adapt-bmad/. Adapter depends on lintSprint, getOrInitConfig, and validateAndWriteBacklog (reused from adopt-write.ts); none of those depend on adapter.
+        - The /adopt skill MUST NOT reference adapt-bmad. They are siblings, both depending on the schema, neither depending on the other.
+
+      AC VERIFICATION:
+        - pnpm --dir plugins/sprint-orchestrator verify must pass (build + typecheck + lint + unit tests). Behavioural correctness is Story 2's e2e responsibility.
 
       OUT OF SCOPE:
-        - OSC 52 clipboard auto-copy is Story 2. Do not implement here.
-        - Any README rewording is Story 3. Do not edit README.md here.
+        - Auto-detection of BMad shape inside /adopt. /adopt stays oblivious.
+        - Parallel dependency declarations beyond sequential. BMad story files may carry a `depends_on:` frontmatter field in a future sprint.
+        - Editing existing BMad-authored story files to add Verification sections. Story 2's goldens are net-new fixtures.
+
   - id: "2"
-    title: Spike + implement OSC 52 clipboard auto-copy for the /goal command (with env-var opt-out)
-    status: done
-    depends_on:
-      - "1"
+    title: "Deterministic e2e coverage for adapt-bmad — happy path, missing Verification refusal, malformed input refusal"
+    status: ready
+    depends_on: ["1"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint emits OSC 52 clipboard sequence
-            for goal command with opt-out"
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"adapt-bmad happy path missing-verification refusal malformed refusal\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-rse-2
-      claimed_at: 2026-05-13T12:45:35.005Z
-      completed_at: 2026-05-13T12:52:24.709Z
-      summary: OSC 52 spike confirmed Claude Code strips terminal escapes; documented in follow-ups.md and
-        wired SPRINT_ORCHESTRATOR_NO_CLIPBOARD as a no-op opt-out gate with e2e proving no escapes
-        leak and /goal stays last line.
       rework_count: 0
-      artefacts:
-        - git:718525aec5cc55e3e04e741c3d326be2fc0dd847
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-        - _bmad-output/planning-artifacts/follow-ups.md
-    notes: >
-      PROBLEM: even with Story 1's last-line guarantee, the user still has to select and copy. OSC
-      52 is a terminal escape that loads a string directly into the system clipboard — supported by
-      iTerm2, Kitty, WezTerm, modern Windows Terminal, Alacritty, and others. If the Claude Code
-      harness passes escape codes through to the user's terminal, we can copy the /goal command into
-      the clipboard automatically — user just pastes.
+    notes: |
+      PROBLEM: Story 1 ships the deterministic adaptor. Story 2 locks the behaviour with e2e assertions that exercise the helper directly (not the skill body — same approach we used for adopt-write).
 
+      WHAT TO BUILD:
+        - Extend plugins/sprint-orchestrator/scripts/e2e.ts with runAdaptBmadMiniRun() behind grep tag "adapt-bmad happy path missing-verification refusal malformed refusal".
+        - Three golden-fixture BMad directories under plugins/sprint-orchestrator/scripts/fixtures/adapt-bmad/:
+            * happy/ — a minimal valid BMad output: planning-artifacts/epics.md with 1 epic, 2 stories, sequential; implementation-artifacts/<story-key>.md files for both, each with a valid Verification section.
+            * missing-verification/ — same shape as happy/, but the second story file omits the Verification section.
+            * malformed/ — same shape as happy/, but the first story file has a broken shell fence (e.g. unclosed code block, or no shell command inside the fence).
 
-      RISK: we are not 100% sure Claude Code passes terminal escapes through verbatim. This story
-      starts with a spike. If the spike fails, the implementation is dropped to follow-ups.md and
-      the story closes as "spike-failed — limitation documented" (not "failed").
+      ASSERTIONS:
+        (a) Happy path: adaptBmadOutput({ bmadOutputDir: ".../happy" }) → { ok: true }. The proposalYaml parses as YAML, lintSprint accepts it, the story array has length 2, each story has the expected id ("1", "2"), expected title (matching the BMad story title), and expected acceptance_criteria.checks (matching the shell command from the Verification section). depends_on: [] for story 1; depends_on: ["1"] for story 2.
+        (b) Missing Verification: adaptBmadOutput on the missing-verification fixture → { ok: false }. The reason names the offending story file. No partial output. No file write attempted (helper is pure — no side effects to verify, but assert reason is informative).
+        (c) Malformed shell fence: adaptBmadOutput on the malformed fixture → { ok: false }. The reason names the offending story file and indicates the malformed-fence nature.
 
+      CONVENTIONS:
+        - Mirror prior mini-runs: runAdoptValidateAndWriteMiniRun, runReadmeDocumentsAdoptAndAdaptorPatternMiniRun.
+        - Use the existing scripts/fixtures/ convention from Story 2 of the adopt-skill sprint.
 
-      TASK 1 — Spike (must complete before any implementation):
-        - Construct a minimal test: print an OSC 52 escape sequence (\x1b]52;c;<base64>\x07) from a temporary skill or test harness invocation, with a known unique sentinel string in the clipboard payload.
-        - Verify by checking the system clipboard contents after the print (the developer can use pbpaste on macOS, xclip -o on Linux).
-        - If sentinel string is in clipboard -> escape passes through; PROCEED to Task 2.
-        - If not -> escape is stripped or filtered; HALT implementation.
-
-      TASK 2 — Implementation (only if spike succeeds):
-        - Extend plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-output-format.ts with:
-            * buildClipboardEscape(payload: string): string — returns the OSC 52 sequence wrapping a base64-encoded payload. Pure function.
-            * Modify buildRunSprintFinalOutput() to emit the OSC 52 escape immediately before the /goal line, UNLESS the env var SPRINT_ORCHESTRATOR_NO_CLIPBOARD is set to "1" or "true".
-        - Add a one-line user-facing note above the fresh-context-guidance line: "(your /goal command is also copied to your clipboard — paste with Cmd+V / Ctrl+V)". Lock this string in the constants module. Only emit it when clipboard escape is being emitted (i.e. opt-out is not set).
-
-      TASK 3 — e2e (always required):
-        - Extend scripts/e2e.ts with runRunSprintOsc52ClipboardMiniRun() behind grep tag "run-sprint emits OSC 52 clipboard sequence for goal command with opt-out".
-        - Assertions:
-            (a) buildRunSprintFinalOutput(N) WITHOUT the env var set: output contains a substring matching the OSC 52 pattern (\x1b]52;c;[A-Za-z0-9+/=]+\x07), the base64 payload decodes to the canonical /goal command, and the user-facing clipboard note is present.
-            (b) buildRunSprintFinalOutput(N) WITH SPRINT_ORCHESTRATOR_NO_CLIPBOARD=1 set: NO OSC 52 substring present, NO clipboard note in output, /goal line still present as last line.
-            (c) If the spike failed and implementation was dropped: the test stub emits a structured skip with a clear reason; the assertion is recorded as PASS with a note that ties to follow-ups.md.
-
-      FAILURE PATH (spike fails):
-        - Document the result in _bmad-output/planning-artifacts/follow-ups.md under a new entry "OSC 52 clipboard auto-copy blocked by harness escape filtering" with: what was tested, what was observed, recommended next step (e.g. revisit when Claude Code adds a clipboard primitive).
-        - The e2e mini-run still runs, but its assertions check only that the env-var opt-out is wired (no-op safety) and that no OSC 52 sequence leaks into output.
-
-      OUT OF SCOPE:
-        - Cross-terminal compatibility testing beyond the spike. We trust OSC 52 to do its thing where supported; the env-var opt-out is the user's escape hatch.
-        - README documentation is Story 3.
   - id: "3"
-    title: README documents the new run-sprint output flow (last-line, fresh-context, clipboard auto-copy)
-    status: done
-    depends_on:
-      - "1"
-      - "2"
+    title: "README documents the adapt-bmad fast path and the BMad-side Verification section convention"
+    status: ready
+    depends_on: ["1", "2"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "README documents run-sprint last-line
-            fresh-context and clipboard flow"
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e --grep \"README documents adapt-bmad fast path and verification convention\""
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-rse-3
-      claimed_at: 2026-05-13T12:52:37.056Z
-      completed_at: 2026-05-13T12:55:57.281Z
-      summary: Updated plugins/sprint-orchestrator/README.md "Running a sprint" section to document the
-        /goal final-line output, fresh-context rationale, and clipboard auto-copy deferral; added
-        readme-runsprint-phrases.ts lock module and an e2e mini-run.
       rework_count: 0
-      artefacts:
-        - git:c886aa5a68d683f3c91b591a07e3353debb9a860
-        - plugins/sprint-orchestrator/README.md
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-runsprint-phrases.ts
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-    notes: >
-      PROBLEM: Stories 1 and 2 change the on-screen behaviour of run-sprint. The README must explain
-      the new flow so users know to expect the /goal line on the last line, that it's in their
-      clipboard (when supported), and the rationale for pasting in a fresh context window.
+    notes: |
+      PROBLEM: The README documents universal /adopt and names the adaptor pattern, but doesn't yet document the first concrete adaptor (adapt-bmad) or the Verification section convention that BMad story authors must follow.
 
-
-      BEHAVIOUR (README.md "Running a sprint" section):
-        - Update the run-sprint description to state: the wrapper computes the turn cap (existing content — preserve), prints the canonical /goal command as the final line of output, and on terminals that support OSC 52 also loads it into the user's clipboard.
-        - Add a short rationale: "Paste the /goal command in a fresh context window. A clean transcript gives the /goal evaluator the best chance of correctly deciding when the drain condition is met."
-        - Document the opt-out: "If your terminal renders OSC 52 sequences as garbage characters, set SPRINT_ORCHESTRATOR_NO_CLIPBOARD=1 to disable the clipboard auto-copy."
-        - If Story 2's spike failed and OSC 52 was not implemented: documentation must NOT claim clipboard auto-copy exists. Instead, link to follow-ups.md and note "clipboard auto-copy is tracked as a follow-up."
+      BEHAVIOUR (README.md, in the "Running a sprint" section's adaptor-pattern paragraph):
+        - Cite /sprint-orchestrator:adapt-bmad as the first concrete adaptor shipped, fitting the documented adaptor-pattern slot.
+        - Explain when to use adapt-bmad vs universal /adopt: adapt-bmad is deterministic and instant, suited for BMad-authored stories; /adopt remains the catch-all for any other source.
+        - Document the BMad-side Verification section convention with a concrete example showing the fenced shell block.
+        - Make explicit: the convention is a BMad-side authoring responsibility. The adaptor refuses cleanly when the section is missing — no silent fallback.
 
       LOCK ASSERTION PHRASES:
-        - Mirror the readme-adopt-phrases.ts pattern from the prior sprint.
-        - New module: plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-runsprint-phrases.ts.
-        - Export: FRESH_CONTEXT_RATIONALE (string), CLIPBOARD_OPT_OUT_INSTRUCTION (string).
+        - Mirror readme-adopt-phrases.ts and readme-runsprint-phrases.ts.
+        - New module: plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-adapt-bmad-phrases.ts.
+        - Export: ADAPT_BMAD_INTRO (string), VERIFICATION_SECTION_EXAMPLE (string, includes the fenced shell example), VERIFICATION_REQUIREMENT_STATEMENT (string).
 
       INTEGRATION AC:
-        - New e2e mini-run runReadmeDocumentsRunSprintLastLineMiniRun() behind grep tag "README documents run-sprint last-line fresh-context and clipboard flow".
+        - New e2e mini-run runReadmeDocumentsAdaptBmadMiniRun() behind grep tag "README documents adapt-bmad fast path and verification convention".
         - Assertions:
-            (a) "Running a sprint" section of README contains the FRESH_CONTEXT_RATIONALE constant verbatim.
-            (b) The section describes /goal as the final line of output (look for an unambiguous phrase locked in the constants module).
-            (c) Conditional on Story 2 outcome:
-                * If OSC 52 was implemented (constants module exports buildClipboardEscape): README contains CLIPBOARD_OPT_OUT_INSTRUCTION verbatim.
-                * If OSC 52 was dropped to follow-ups: README contains a sentence acknowledging clipboard auto-copy is deferred, with a link or pointer to follow-ups.md.
-
-      FILES TO TOUCH:
-        - plugins/sprint-orchestrator/README.md
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-runsprint-phrases.ts (NEW)
-        - plugins/sprint-orchestrator/scripts/e2e.ts
+            (a) "Running a sprint" section contains ADAPT_BMAD_INTRO verbatim.
+            (b) Section contains VERIFICATION_REQUIREMENT_STATEMENT verbatim.
+            (c) Section contains VERIFICATION_SECTION_EXAMPLE verbatim (the fenced shell block as a literal substring).
+            (d) Section explicitly references both adapt-bmad and the universal adopt, so a reader sees the choice.
 
       OUT OF SCOPE:
-        - Editing other README sections (adopt, process-backlog) unless those edits are required to keep the "Running a sprint" section coherent.
+        - Editing other README sections.
+        - Authoring a full schema doc.
+
   - id: "4"
-    title: Ship gate — pnpm e2e + verify green
-    status: done
-    depends_on:
-      - "1"
-      - "2"
-      - "3"
+    title: "Ship gate — pnpm e2e + verify green"
+    status: ready
+    depends_on: ["1", "2", "3"]
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e
+          cmd: "pnpm --dir plugins/sprint-orchestrator e2e"
           expect_exit: 0
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          cmd: "pnpm --dir plugins/sprint-orchestrator verify"
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-rse-4
-      claimed_at: 2026-05-13T12:56:13.839Z
-      rework_count: 1
-      last_review_feedback: "pnpm verify fails with 2 ESLint no-control-regex errors in
-        plugins/sprint-orchestrator/scripts/e2e.ts at lines 1938 and 2021 (OSC 52 regex patterns
-        introduced by story 2). E2E passes 78/78 but the ship gate is blocked by lint. Fix: add
-        targeted `// eslint-disable-next-line no-control-regex` comments at scripts/e2e.ts:1938 and
-        :2021 (or equivalent narrow fix that doesn't weaken the regex match — the control chars are
-        intentional for matching OSC 52 escape sequences). This is a one-line-per-site fix; do not
-        refactor the mini-run logic."
-      last_review_at: 2026-05-13T12:59:39.004Z
-      completed_at: 2026-05-13T13:08:33.100Z
-      summary: "Ship gate green: pnpm e2e (78/78) and pnpm verify both exit 0 after narrow eslint-disable
-        comments for intentional OSC 52 control-char regexes."
-      artefacts:
-        - git:fc8d28972e5860999f665efbe5ebb87d8c7e0f85
-    notes: >
-      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
-      cleanly and don't regress existing assertions.
+      rework_count: 0
+    notes: |
+      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate cleanly and don't regress existing assertions.
 
-
-      If this fails, the reviewer should rework the offending prior story, not record this one as
-      failed.
+      If this fails, the reviewer should rework the offending prior story, not record this one as failed.
