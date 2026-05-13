@@ -164,7 +164,7 @@ stories:
       dep is returned by getReadyStories without manual flip.
   - id: "5"
     title: Stage by artefact allowlist + ship default .sprint-orchestrator/ exclusion
-    status: in_progress
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -181,6 +181,12 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix2-5
       claimed_at: 2026-05-13T02:30:32.455Z
+      completed_at: 2026-05-13T02:33:47.251Z
+      summary: Extended commitStoryArtefacts pathspec exclusions to keep .sprint-orchestrator/, .claude/,
+        .DS_Store, and node_modules out of orchestrator commits, with new e2e + unit coverage.
+      artefacts:
+        - git:d63a24bf64b9ebbe269a776dd4559ab8144ed208
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
     notes: |
       ROOT CAUSE OF NEW BUGS 1+2: commitStoryArtefacts uses `git add -A`
       with only sprint-status.yaml excluded. In a real repo without a
