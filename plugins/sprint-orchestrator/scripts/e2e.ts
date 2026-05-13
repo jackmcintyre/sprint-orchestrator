@@ -262,7 +262,12 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
   const ctx = makeContext(root);
 
   // Drive the full flow once, capture artifacts, then run assertions.
-  const happy = await driveHappyPathStory(ctx, "A", "agent-A");
+  // A needs a real code change so the "two commits" assertion is meaningful;
+  // its fixture AC just checks src/hello.txt exists, but commitStoryArtefacts
+  // needs *something* in the working tree to commit as the "code" half.
+  const happy = await driveHappyPathStory(ctx, "A", "agent-A", async () => {
+    await fs.writeFile(path.join(root, "src", "hello.txt"), "hello (modified by A)\n", "utf8");
+  });
 
   // Auto-promotion check happens BEFORE we touch B. After A is done,
   // getReadyStories should promote B from backlog to ready.

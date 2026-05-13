@@ -57,11 +57,12 @@ export async function commitStoryArtefacts(
   const state = await readSprintStatus(ctx.sprintStatusPath);
   const story = findStory(state, storyId);
 
-  await run(ctx.projectRoot, "git", ["add", "-A", "--", ...PATHSPEC_EXCLUSIONS]);
+  await run(ctx.projectRoot, "git", ["add", "-A", "--", ".", ...PATHSPEC_EXCLUSIONS]);
   const status = await capture(ctx.projectRoot, "git", [
     "status",
     "--porcelain",
     "--",
+    ".",
     ...PATHSPEC_EXCLUSIONS,
   ]);
   if (!status.stdout.trim()) return { sha: null };
