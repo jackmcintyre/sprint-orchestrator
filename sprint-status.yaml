@@ -13,11 +13,11 @@ stories:
     orchestrator:
       claimed_by: dev-2026-05-13T1
       claimed_at: 2026-05-13T09:49:11.248Z
-      rework_count: 0
       completed_at: 2026-05-13T10:01:51.375Z
       summary: Reviewer agent now escalates to recordStoryRework instead of recordStoryFailure on first AC
         miss when dev has produced a feat commit since claim; new e2e assertion guards the
         behaviour.
+      rework_count: 0
       artefacts:
         - git:8072b9b8af7cb79b619ec14e23ddd67474409a77
         - plugins/sprint-orchestrator/agents/reviewer.md
@@ -72,7 +72,7 @@ stories:
           minor wording update to make the contract explicit)
   - id: "2"
     title: Reviewer returns distinct "blocked:" status when an MCP call is rejected
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -81,7 +81,18 @@ stories:
             machine rejects recordStorySuccess"
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-2026-05-13T2
+      claimed_at: 2026-05-13T10:02:07.654Z
       rework_count: 0
+      completed_at: 2026-05-13T10:07:42.534Z
+      summary: Reviewer now returns a distinct "blocked:" status when MCP rejects a state-mutation call,
+        and the process-backlog skill hard-stops the run on that signal; covered by a new e2e
+        mini-run.
+      artefacts:
+        - git:9dd3c4fe19ab5b4b486c4b714808b49ec38b8b44
+        - plugins/sprint-orchestrator/agents/reviewer.md
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: |
       PROBLEM: in the triage-1 run, the reviewer attempted
       recordStorySuccess on stories that were already in `failed`
