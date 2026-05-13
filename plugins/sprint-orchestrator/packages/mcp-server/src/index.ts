@@ -15,6 +15,7 @@ import { validateAcceptanceCriteria } from "./tools/validate-acceptance-criteria
 import { releaseStaleClaims } from "./tools/release-stale-claims.js";
 import { getOrInitConfig } from "./tools/get-or-init-config.js";
 import { commitStoryArtefacts } from "./tools/commit-story-artefacts.js";
+import { lintSprint } from "./tools/lint-sprint.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -170,6 +171,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { storyId: z.string() },
     },
     async ({ storyId }) => json(await commitStoryArtefacts(ctx, storyId)),
+  );
+
+  server.registerTool(
+    "lintSprint",
+    {
+      title: "Lint sprint acceptance criteria",
+      description:
+        "Read-only lint pass over sprint-status.yaml. Flags state-mutator stories (touching mark-story-*.ts, commit-story-artefacts.ts, get-ready-stories.ts, schema.ts, etc.) that lack an integration AC, shell checks with known-bad patterns (e.g. vitest --grep), and trivially-satisfiable regex checks. Returns { issues, rendered }.",
+      inputSchema: { sprintStatusPath: z.string().optional() },
+    },
+    async ({ sprintStatusPath }) => json(await lintSprint(ctx, { sprintStatusPath })),
   );
 
   server.registerTool(

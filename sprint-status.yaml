@@ -213,7 +213,7 @@ stories:
       .sprint-orchestrator/, or sprint-status.yaml entries.
   - id: "7"
     title: AC linter — flag structural-only ACs on state-mutator stories
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
     acceptance_criteria:
@@ -229,7 +229,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix2-7
+      claimed_at: 2026-05-13T02:37:03.791Z
     notes: |
       Carried forward from the original bugfix-2 backlog (AC dry-run
       tool), with one critical addition derived from the bugfix-1 retest.
