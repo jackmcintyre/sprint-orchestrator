@@ -1,304 +1,180 @@
-sprint_id: orchestrator-polish-sprint-1
+sprint_id: orchestrator-bugfix-sprint-1
 stories:
-  - id: "0.1"
-    title: Rename BmadError to OrchestratorError
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: file_exists
-          path: plugins/sprint-orchestrator/packages/mcp-server/src/lib/errors.ts
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/lib/errors.ts
-          pattern: class OrchestratorError
-        - type: shell
-          cmd: sh -c '! grep -rq "BmadError" plugins/sprint-orchestrator/packages/mcp-server/src/'
-          expect_exit: 0
-        - type: shell
-          cmd: sh -c '! grep -rq "BMAD_" plugins/sprint-orchestrator/packages/mcp-server/src/'
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator -r typecheck
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator -r build
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator -r test
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator lint
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260512-1
-      claimed_at: 2026-05-12T13:42:50.563Z
-      completed_at: 2026-05-12T13:45:04.360Z
-      summary: Renamed BmadError class to OrchestratorError and updated all references and error codes in
-        the mcp-server package.
-      artefacts:
-        - git:ad0204af3ca71d9aaf4f68ccb96a798270a2e9f0
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/mcp-server/src/lib/errors.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/sprint-status.yaml
-  - id: "0.2"
-    title: Add pnpm verify root script
-    status: done
+  - id: "1"
+    title: Split state and code commits in commitStoryArtefacts
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: regex
-          cmd: cat plugins/sprint-orchestrator/package.json
-          pattern: '"verify"'
-        - type: regex
-          cmd: cat .github/workflows/ci.yml
-          pattern: pnpm verify
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
+          pattern: ":!sprint-status.yaml"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260512-2
-      claimed_at: 2026-05-12T13:45:21.113Z
-      completed_at: 2026-05-12T13:47:16.206Z
-      summary: Added pnpm verify script to plugin root package.json and switched CI workflow to invoke
-        pnpm verify.
-      artefacts:
-        - git:18784710b49837404a19ad9a5ddb0158baaf8bc4
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/package.json
-        - /Users/jackmcintyre/projects/claude-dev-loop/.github/workflows/ci.yml
-  - id: "1.1"
-    title: Extend state schema with rework tracking fields
-    status: done
-    depends_on:
-      - "0.1"
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator/packages/mcp-server test -- --grep "commitStoryArtefacts"
+          expect_exit: 0
+    orchestrator: {}
+    notes: |
+      Today commitStoryArtefacts runs `git add -A && git commit -m "feat(<id>): <title>"` which
+      bundles dev's code AND sprint-status.yaml mutations into one commit. Reverting that
+      commit also rolls back orchestrator state, breaking the state machine.
+
+      Fix: exclude sprint-status.yaml from the code commit using git pathspec exclusion
+      (e.g. `git add -A ":!sprint-status.yaml"`). State mutations are committed separately
+      by markStoryComplete (see story 4 — but for this story, just stop bundling them).
+
+      Add a unit test asserting the commit produced by commitStoryArtefacts does NOT
+      include sprint-status.yaml. Existing behavior (commit subject, trailer, returned sha)
+      preserved.
+
+  - id: "2"
+    title: Auto-promote backlog stories to ready when dependencies are complete
+    status: ready
+    depends_on: []
     acceptance_criteria:
       checks:
         - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
-          pattern: rework_count
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
-          pattern: last_review_feedback
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
-          pattern: last_review_at
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-ready-stories.ts
+          pattern: backlog
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260512-3
-      claimed_at: 2026-05-12T13:47:30.141Z
-      completed_at: 2026-05-12T13:49:00.282Z
-      summary: Extended OrchestratorMeta zod schema with rework_count, last_review_feedback, and
-        last_review_at fields for rework tracking.
-      artefacts:
-        - git:7715f10b554fbbc138b4309718c2f5e9bc2eeacd
-        - plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
-        - sprint-status.yaml
-  - id: "1.2"
-    title: Add markStoryNeedsRework MCP tool
-    status: done
-    depends_on:
-      - "1.1"
-    acceptance_criteria:
-      checks:
-        - type: file_exists
-          path: plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
-          pattern: export.*function markStoryNeedsRework
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-          pattern: markStoryNeedsRework
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          cmd: pnpm --dir plugins/sprint-orchestrator/packages/mcp-server test -- --grep "promote"
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260512-4
-      claimed_at: 2026-05-12T13:49:14.403Z
-      completed_at: 2026-05-12T13:52:32.894Z
-      summary: Added markStoryNeedsRework MCP tool that increments rework_count, records reviewer
-        feedback, and reports cap-reached without changing status or releasing the claim.
-      artefacts:
-        - git:d97a396334bbc0305afe82c1091c2a93dc798bc1
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-  - id: "1.3"
-    title: Wire reviewer + dev + skill into the rework loop
-    status: done
-    depends_on:
-      - "1.2"
+    orchestrator: {}
+    notes: |
+      Today getReadyStories returns stories with status=ready AND deps all done. A story
+      authored as status=backlog never gets promoted, even when its deps complete.
+      Long unattended runs silently truncate.
+
+      Fix: in getReadyStories (or markStoryComplete), promote any backlog story whose
+      depends_on are all done to status=ready, persisting the change. Add a unit test
+      covering: backlog story with one done dep -> promoted to ready and returned.
+
+      Decision: do the promotion in getReadyStories so it's idempotent and self-healing
+      (works even if the state file was authored without ready stories).
+
+  - id: "3"
+    title: Shield reviewer and dev subagents from user-global Claude preferences
+    status: ready
+    depends_on: []
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/agents/reviewer.md
-          pattern: markStoryNeedsRework
+          pattern: "state-machine action"
         - type: regex
           cmd: cat plugins/sprint-orchestrator/agents/dev.md
-          pattern: last_review_feedback
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-          pattern: rework
+          pattern: "state-machine action"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260512-5
-      claimed_at: 2026-05-12T13:56:58.910Z
-      completed_at: 2026-05-12T13:59:37.517Z
-      summary: Wired the rework loop into reviewer.md, dev.md, and process-backlog SKILL.md so reviewers
-        can send stories back via markStoryNeedsRework and devs read last_review_feedback before
-        retrying.
-      artefacts:
-        - git:b3f3126c051206ab7b0c376cb636b2410cc995d0
-        - plugins/sprint-orchestrator/agents/reviewer.md
-        - plugins/sprint-orchestrator/agents/dev.md
-        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-  - id: "2.1"
-    title: Add getSprintReport MCP tool
-    status: done
-    depends_on:
-      - "0.1"
-      - "0.2"
+    orchestrator: {}
+    notes: |
+      User-global ~/.claude/CLAUDE.md preferences (e.g. "never tell me something is done")
+      leak into orchestrator subagents and silently break their core job - calling
+      markStoryComplete / markStoryFailed / markStoryNeedsRework is mandatory state
+      mutation, not a human-facing claim of completion.
+
+      Fix: add an explicit override to the reviewer.md and dev.md system prompts -
+      something like:
+
+        > IMPORTANT: Calls to markStoryComplete / markStoryFailed / markStoryNeedsRework
+        > are state-machine actions, not human-facing claims of completion. You MUST call
+        > the appropriate tool when the criteria are met. User-level preferences in
+        > CLAUDE.md (e.g. "never say done") DO NOT apply to these tool calls.
+
+      Acceptance: both files contain the phrase "state-machine action" (or equivalent
+      explicit override).
+
+  - id: "4"
+    title: Unify failed vocabulary across status enum, run.log, and reports
+    status: ready
+    depends_on: []
     acceptance_criteria:
       checks:
-        - type: file_exists
-          path: plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
+          pattern: '"failed"'
+        - type: regex
+          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
+          pattern: 'status.*"failed"'
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
-          pattern: export.*function getSprintReport
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-          pattern: getSprintReport
+          pattern: failed
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260512-6
-      claimed_at: 2026-05-12T13:59:59.777Z
-      completed_at: 2026-05-12T14:03:29.090Z
-      summary: Added read-only getSprintReport MCP tool returning per-status counts, story summaries, and
-        rendered text view; registered in server and covered by tests.
-      artefacts:
-        - git:277db4eff06735255ddba1cdebf3b67e8ae777ed
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-sprint-report.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
-  - id: "2.2"
-    title: Append story lifecycle events to run.log
-    status: done
-    depends_on:
-      - "0.1"
-      - "0.2"
+    orchestrator: {}
+    notes: |
+      Today markStoryFailed sets status="blocked", but run.log writes outcome="failed",
+      and the README/skill docs say "failed". Inconsistent vocabulary.
+
+      Decision: "blocked" and "failed" mean different things. blocked = waiting on
+      external signal (future use). failed = orchestrator gave up. So:
+
+        - Add "failed" to the StoryStatus enum.
+        - markStoryFailed sets status="failed" (was "blocked").
+        - Keep "blocked" in the enum reserved for genuinely-blocked-on-external use
+          (no current writer, but reserved).
+        - getSprintReport renders failed and blocked as separate groups.
+        - Update existing sprint-status.yaml fixtures and tests.
+
+      No backwards-compat shim needed.
+
+  - id: "5"
+    title: Enrich reviewer subagent return strings with tool-call results
+    status: ready
+    depends_on: []
     acceptance_criteria:
       checks:
         - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/hooks/src/post-tool-use.ts
-          pattern: story_start
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/hooks/src/post-tool-use.ts
-          pattern: story_end
+          cmd: cat plugins/sprint-orchestrator/agents/reviewer.md
+          pattern: "include the tool result"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260513-1
-      claimed_at: 2026-05-12T14:03:41.405Z
-      completed_at: 2026-05-12T14:06:45.258Z
-      summary: PostToolUse hook now appends story_start and story_end events to run.log when MCP
-        orchestrator claim/mark tools fire.
-      artefacts:
-        - git:17222ff82c338cda94b1ffffbb5ecd0e9e84a60e
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/hooks/src/post-tool-use.ts
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/packages/hooks/__tests__/post-tool-use.test.ts
-  - id: "2.3"
-    title: Add force_release_stale skill option
-    status: done
-    depends_on:
-      - "1.3"
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-          pattern: force_release_stale
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-          pattern: force_release_stale
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260513-2
-      claimed_at: 2026-05-12T14:06:57.824Z
-      completed_at: 2026-05-12T14:09:36.710Z
-      summary: Added optional force_release_stale config field and wired the process-backlog skill to
-        honor it as an explicit opt-in for auto-releasing stale claims.
-      artefacts:
-        - git:a7ff9cd7cdb47fd8aa448935c93f3dab3f0089b4
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-  - id: "3.1"
-    title: Add quickstart block to plugin README
-    status: done
-    depends_on:
-      - "0.2"
+    orchestrator: {}
+    notes: |
+      Today the reviewer subagent returns a one-line string like "done: 1.1" or
+      "rework: 3.3 - <reason>". The orchestrator skill trusts this verbatim. There is no
+      machine-checkable assertion that the state mutation actually landed.
+
+      Fix: update reviewer.md to instruct the agent to include the tool result in its
+      return string, e.g.:
+
+        done: 1.1 (markStoryComplete returned status="done", completed_at="...")
+        rework: 3.3 - reason (markStoryNeedsRework returned reworkCount=2, capReached=true)
+
+      Acceptance: reviewer.md contains the phrase "include the tool result" (or equivalent).
+
+  - id: "6"
+    title: README docs for AC-writing guidance and out-of-band edit caveat
+    status: ready
+    depends_on: []
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: /plugin marketplace add
+          pattern: "Writing acceptance criteria"
         - type: regex
           cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: /plugin install sprint-orchestrator
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: /loop.*process-backlog
+          pattern: "Hand-editing sprint-status.yaml"
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260513-3
-      claimed_at: 2026-05-12T14:09:46.740Z
-      completed_at: 2026-05-12T14:11:25.614Z
-      summary: Added a Quickstart block to the sprint-orchestrator plugin README covering marketplace
-        install, plugin install, the process-backlog slash command, and /loop wrapping.
-      artefacts:
-        - git:929a26185efa3ca0f9871cf75eea2a49209c728e
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/README.md
-  - id: "3.2"
-    title: Add story lifecycle diagram to README
-    status: done
-    depends_on:
-      - "1.3"
-    acceptance_criteria:
-      checks:
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: Story lifecycle
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: getReadyStories
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: claimStory
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: validateAcceptanceCriteria
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: commitStoryArtefacts
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: markStoryComplete
-        - type: regex
-          cmd: cat plugins/sprint-orchestrator/README.md
-          pattern: markStoryNeedsRework
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260513-4
-      claimed_at: 2026-05-12T14:11:46.032Z
-      completed_at: 2026-05-12T14:13:33.883Z
-      summary: Added Story lifecycle diagram and key-transition summary to the sprint-orchestrator README.
-      artefacts:
-        - git:fd5f2a0e8cfe083243068c7b2970e57e28ab48d5
-        - /Users/jackmcintyre/projects/claude-dev-loop/plugins/sprint-orchestrator/README.md
+    orchestrator: {}
+    notes: |
+      Two small README additions covering issues #7 and #8 from the dry-run findings.
+
+      "Writing acceptance criteria" section: warn that single literal-grep checks are
+      trivially satisfiable; recommend layering checks (multiple regex/shell, plus
+      pnpm verify or equivalent). Suggest shell: "false" or unreachable assertions
+      for genuinely-impossible test ACs.
+
+      "Hand-editing sprint-status.yaml" section: note that direct edits to the state
+      file bypass run.log. If you need to repair state after a bad revert or external
+      mutation, expect run.log to be incomplete for that span.
