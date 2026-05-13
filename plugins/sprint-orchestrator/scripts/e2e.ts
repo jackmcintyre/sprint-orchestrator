@@ -17,14 +17,13 @@
  * companion regression-fix stories land. That is by design.
  */
 import { spawnSync } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { claimStory } from "../packages/mcp-server/src/tools/claim-story.js";
 import { commitStoryArtefacts } from "../packages/mcp-server/src/tools/commit-story-artefacts.js";
-import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
 import { markStoryComplete } from "../packages/mcp-server/src/tools/mark-story-complete.js";
 import { markStoryFailed } from "../packages/mcp-server/src/tools/mark-story-failed.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
@@ -33,6 +32,14 @@ import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = path.resolve(HERE, "..", "__fixtures__", "tiny-sprint");
+const MCP_SERVER_DIR = path.resolve(HERE, "..", "packages", "mcp-server");
+const MCP_SERVER_DIST_ENTRY = path.join(MCP_SERVER_DIR, "dist", "index.js");
+const MCP_SERVER_DIST_GET_READY = path.join(
+  MCP_SERVER_DIR,
+  "dist",
+  "tools",
+  "get-ready-stories.js",
+);
 
 interface Assertion {
   name: string;
@@ -96,6 +103,44 @@ async function setupTempRepo(): Promise<string> {
   const commit = git(root, ["commit", "-q", "-m", "initial fixture import"]);
   if (commit.status !== 0) throw new Error(`initial commit failed: ${commit.stderr}`);
   return root;
+}
+
+/**
+ * Ensure the mcp-server `dist/` build exists and is current. The published
+ * MCP entry (per plugins/sprint-orchestrator/.mcp.json) is `dist/index.js`,
+ * so any e2e assertion that wants to faithfully reproduce what the
+ * orchestrator skill sees at runtime must talk to the dist build, not the
+ * TypeScript source. We rebuild on every e2e run so a forgotten `pnpm build`
+ * after a src edit does NOT silently mask a regression.
+ */
+function ensureDistBuilt(): void {
+  const r = spawnSync("pnpm", ["--filter", "@sprint-orchestrator/mcp-server", "build"], {
+    cwd: path.resolve(HERE, ".."),
+    encoding: "utf8",
+    stdio: "inherit",
+  });
+  if (r.status !== 0) {
+    throw new Error(`mcp-server build failed (exit ${r.status ?? "?"})`);
+  }
+  if (!existsSync(MCP_SERVER_DIST_ENTRY) || !existsSync(MCP_SERVER_DIST_GET_READY)) {
+    throw new Error(
+      `mcp-server dist build missing expected files after build: ${MCP_SERVER_DIST_ENTRY}, ${MCP_SERVER_DIST_GET_READY}`,
+    );
+  }
+}
+
+/**
+ * Dynamic import of the dist build of `getReadyStories`. Using a dynamic
+ * import (a) keeps tsc happy when dist is absent at type-check time, and
+ * (b) forces the read from the actual published entry the MCP server uses
+ * at runtime — which is what makes this assertion a faithful repro of
+ * stale-dist regressions.
+ */
+async function getReadyStoriesViaDist(ctx: ToolContext): Promise<{ id: string }[]> {
+  const mod = (await import(MCP_SERVER_DIST_GET_READY)) as {
+    getReadyStories: (c: ToolContext) => Promise<{ id: string }[]>;
+  };
+  return mod.getReadyStories(ctx);
 }
 
 function makeContext(root: string): ToolContext {
@@ -221,7 +266,15 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
 
   // Auto-promotion check happens BEFORE we touch B. After A is done,
   // getReadyStories should promote B from backlog to ready.
-  const ready = await getReadyStories(ctx);
+  //
+  // We deliberately exercise the **published** entry (dist/) here, not the
+  // TypeScript source. The orchestrator skill talks to the MCP server via
+  // `node dist/index.js` (see plugins/sprint-orchestrator/.mcp.json), so a
+  // src-only test is not a faithful repro of Jack's case. When dist is stale
+  // relative to src (e.g. a fix that landed without rebuilding dist), this
+  // assertion fails — exactly the silent regression Jack hit on Tinytodo
+  // after bugfix-1 story #2 supposedly landed the promote helper.
+  const ready = await getReadyStoriesViaDist(ctx);
   const readyIds = ready.map((s) => s.id);
 
   // Drive B (the auto-promoted story). Dev creates src/world.txt to satisfy AC.
@@ -350,6 +403,11 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
+
+  // Build the mcp-server dist BEFORE setting up the temp repo so we fail
+  // fast on a broken build, and so the auto-promotion assertion always
+  // exercises the latest src — see ensureDistBuilt() for why this matters.
+  ensureDistBuilt();
 
   const root = await setupTempRepo();
   console.log(`[e2e] temp repo: ${root}`);
