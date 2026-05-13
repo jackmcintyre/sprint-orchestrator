@@ -107,6 +107,51 @@ pnpm -r typecheck   # tsc --noEmit
 pnpm lint           # eslint
 ```
 
+## Writing acceptance criteria
+
+Acceptance criteria (`acceptance_criteria.checks` in `sprint-status.yaml`) are
+the deterministic gate between "dev says done" and "story is committed". They
+are only as strong as you make them — a single literal-grep is trivially
+satisfiable by an agent that decides to write the matching string into a file.
+
+Guidance:
+
+- **Layer multiple checks.** Combine regex/shell assertions with a real build
+  or test invocation. A typical story should have at least one structural check
+  (regex/file-exists) plus one behavioural check (`pnpm verify`, `pnpm test`,
+  `tsc --noEmit`, etc.). The whole list must pass.
+- **Avoid bare literal greps as the sole criterion.** `grep "TODO done"` proves
+  nothing. Prefer regex patterns that anchor to real code shapes
+  (function/export signatures, config keys, route paths) and back them with a
+  command that exercises the behaviour.
+- **For genuinely-impossible or "do not implement" stories**, use an
+  unreachable assertion such as `shell: "false"` or a check that asserts the
+  absence of forbidden patterns. Do not rely on a passing-by-default check.
+- **Prefer `expect_exit: 0` shell checks** for anything that has a real test
+  harness — they fail loudly when the code regresses, unlike a regex that may
+  silently still match.
+
+## Hand-editing sprint-status.yaml
+
+`sprint-status.yaml` is the canonical state file, but it is not the only source
+of truth the orchestrator relies on — every transition the orchestrator
+performs is also appended to `.sprint-orchestrator/run.log`. Direct edits to
+`sprint-status.yaml` (or reverts via `git checkout`) bypass `run.log`
+entirely.
+
+This is fine for occasional repair (unsticking a stale claim, fixing a typo in
+a story spec), but be aware:
+
+- `run.log` will be **incomplete** for any span where state changed out of
+  band. Audit trails, retrospectives, and any tooling that reconstructs
+  history from the log will see a gap.
+- If you revert `sprint-status.yaml` after a bad run, the log still contains
+  the now-orphaned transitions. Consider annotating the log manually, or
+  truncating it alongside the revert if you need a clean baseline.
+- Prefer the orchestrator's tools (`releaseStaleClaims`, `markStoryFailed`,
+  etc.) over hand edits whenever an equivalent tool exists — they keep state
+  and log in sync.
+
 ## License
 
 MIT

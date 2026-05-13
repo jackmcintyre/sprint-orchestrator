@@ -173,7 +173,7 @@ stories:
       No backwards-compat shim needed.
   - id: "5"
     title: Enrich reviewer subagent return strings with tool-call results
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -186,6 +186,13 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix-5
       claimed_at: 2026-05-13T00:47:04.657Z
+      completed_at: 2026-05-13T00:48:39.811Z
+      summary: Updated reviewer.md to instruct agents to include the tool result from state-mutation calls
+        in their return string so the orchestrator can verify the mutation landed.
+      artefacts:
+        - git:ce95ea55fdd8b011592dbb295627a83d291e3fb8
+        - plugins/sprint-orchestrator/agents/reviewer.md
+        - sprint-status.yaml
     notes: |
       Today the reviewer subagent returns a one-line string like "done: 1.1" or
       "rework: 3.3 - <reason>". The orchestrator skill trusts this verbatim. There is no
@@ -200,7 +207,7 @@ stories:
       Acceptance: reviewer.md contains the phrase "include the tool result" (or equivalent).
   - id: "6"
     title: README docs for AC-writing guidance and out-of-band edit caveat
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -213,7 +220,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix-6
+      claimed_at: 2026-05-13T00:48:54.022Z
     notes: |
       Two small README additions covering issues #7 and #8 from the dry-run findings.
 
