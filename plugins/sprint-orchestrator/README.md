@@ -46,6 +46,8 @@ Then in Claude Code:
 /plugin install <path-to-this-repo>
 ```
 
+> **Heads-up — adding or renaming MCP tools requires a full Claude Code restart.** `/reload-plugins` reloads the MCP server but does not refresh Claude Code's deferred-tools registry, so newly registered tools (or renames) stay invisible until you exit and relaunch. If you upgrade this plugin and the orchestrator can't see a new tool, restart Claude Code.
+
 ## Story lifecycle
 
 Each story moves through a deterministic pipeline. The orchestrator owns state transitions; LLM subagents only handle implementation and review.

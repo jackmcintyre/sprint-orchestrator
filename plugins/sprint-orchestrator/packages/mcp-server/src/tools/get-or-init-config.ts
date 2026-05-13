@@ -23,6 +23,33 @@ export interface OrchestratorConfig {
    * themselves (the safe default).
    */
   force_release_stale?: number;
+  /**
+   * If true, the orchestrator creates a per-story branch before the dev
+   * subagent commits. Defaults to `false` while the per-story workflow is
+   * incomplete — push, PR creation, and dependency-aware branch rooting
+   * land in later slices. Opt in explicitly to test the in-flight slices.
+   */
+  pr_per_story?: boolean;
+  /**
+   * Default base branch that per-story PRs are opened against. Defaults to
+   * `"main"` when omitted.
+   *
+   * NOTE: This field is currently passive — it is parsed and round-tripped
+   * through the config but no consumer reads it yet. Story 2 wires it in.
+   */
+  default_base?: string;
+}
+
+/** Defaults applied when a config omits the new pr-per-story fields. */
+const DEFAULT_PR_PER_STORY = false;
+const DEFAULT_BASE_BRANCH = "main";
+
+function withPrPerStoryDefaults(config: OrchestratorConfig): OrchestratorConfig {
+  return {
+    ...config,
+    pr_per_story: config.pr_per_story ?? DEFAULT_PR_PER_STORY,
+    default_base: config.default_base ?? DEFAULT_BASE_BRANCH,
+  };
 }
 
 export interface ConfigResult {
@@ -41,12 +68,12 @@ export interface ConfigResult {
  */
 export async function getOrInitConfig(ctx: ToolContext): Promise<ConfigResult> {
   const existing = await readExisting(ctx.configPath);
-  if (existing) return { config: existing, needsSetup: false };
+  if (existing) return { config: withPrPerStoryDefaults(existing), needsSetup: false };
 
   const detected = await detectBmadV6(ctx.projectRoot);
   if (detected) {
     await writeConfig(ctx.configPath, detected);
-    return { config: detected, needsSetup: false };
+    return { config: withPrPerStoryDefaults(detected), needsSetup: false };
   }
 
   return {
