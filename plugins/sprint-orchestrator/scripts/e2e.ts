@@ -57,6 +57,11 @@ import {
   PRODUCER_EXAMPLE_FRAMING,
 } from "../packages/mcp-server/src/tools/readme-adopt-phrases.js";
 import {
+  ADAPT_BMAD_INTRO,
+  VERIFICATION_REQUIREMENT_STATEMENT,
+  VERIFICATION_SECTION_EXAMPLE,
+} from "../packages/mcp-server/src/tools/readme-adapt-bmad-phrases.js";
+import {
   CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT,
   CLIPBOARD_OPT_OUT_INSTRUCTION,
   FRESH_CONTEXT_RATIONALE,
@@ -2661,6 +2666,123 @@ async function runReadmeDocumentsRunSprintLastLineMiniRun(): Promise<AssertionOu
 }
 
 /**
+ * adapt-bmad sprint, story 3 — README documents the adapt-bmad fast
+ * path and the BMad-side Verification section convention.
+ *
+ * The locked phrases live in `readme-adapt-bmad-phrases.ts` and are the
+ * single source of truth — README and assertions cannot drift.
+ */
+async function runReadmeDocumentsAdaptBmadMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const readmePath = path.resolve(HERE, "..", "README.md");
+  let readme = "";
+  try {
+    readme = await fs.readFile(readmePath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "README documents adapt-bmad fast path and verification convention: file readable",
+      passed: false,
+      error: `could not read README at ${readmePath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  // Same scoping rule as the sibling mini-runs: the "Running a sprint"
+  // section runs from its heading to the next top-level heading.
+  function extractRunningSection(text: string): string | null {
+    const m = text.match(/\n##\s+Running a sprint\b[\s\S]*?(?=\n##\s+|\n?$)/);
+    return m ? m[0] : null;
+  }
+
+  const section = extractRunningSection(readme);
+
+  const checks: Assertion[] = [
+    {
+      name: "README documents adapt-bmad fast path and verification convention: running-a-sprint section exists",
+      run: () => {
+        expect(section !== null, "README is missing the '## Running a sprint' section");
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: adapt-bmad intro is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(ADAPT_BMAD_INTRO),
+          `Running-a-sprint section does not contain the adapt-bmad intro verbatim. Expected: '${ADAPT_BMAD_INTRO}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: verification requirement statement is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(VERIFICATION_REQUIREMENT_STATEMENT),
+          `Running-a-sprint section does not contain the verification-requirement statement verbatim. Expected: '${VERIFICATION_REQUIREMENT_STATEMENT}'`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: verification fenced-shell example is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(VERIFICATION_SECTION_EXAMPLE),
+          `Running-a-sprint section does not contain the verification fenced-shell example verbatim. Expected:\n${VERIFICATION_SECTION_EXAMPLE}`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: section names both adapt-bmad and universal adopt so reader sees the choice",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes("/sprint-orchestrator:adapt-bmad"),
+          "Running-a-sprint section does not reference /sprint-orchestrator:adapt-bmad",
+        );
+        expect(
+          section.includes(ADOPT_COMMAND),
+          `Running-a-sprint section does not reference universal ${ADOPT_COMMAND} alongside adapt-bmad`,
+        );
+      },
+    },
+    {
+      name: "README documents adapt-bmad fast path and verification convention: prior sprint content preserved",
+      run: () => {
+        // Guard against accidental deletion of prior sprint content.
+        expect(
+          /ceil\(\s*story_count\s*\*\s*turn_cap_per_story\s*\)/.test(readme),
+          "README no longer documents the cap formula 'ceil(story_count * turn_cap_per_story)' — adapt-bmad edits must not delete prior sprint content",
+        );
+        expect(
+          readme.includes("Sprint drain confirmed:") &&
+            readme.includes("Sprint paused at hard cap:") &&
+            readme.includes("Sprint blocked:"),
+          "README no longer documents all three end-of-run summary prefixes — adapt-bmad edits must not delete prior sprint content",
+        );
+      },
+    },
+  ];
+
+  for (const a of checks) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  return outcomes;
+}
+
+/**
  * Story 1.2 — deterministic e2e coverage for the adopt validate-and-write path.
  *
  * Exercises `validateAndWriteBacklog` directly (the LLM drafting step is an
@@ -3185,6 +3307,14 @@ async function main(): Promise<number> {
     );
     const readmeRunSprintOutputOutcomes = await runReadmeDocumentsRunSprintLastLineMiniRun();
     outcomes.push(...readmeRunSprintOutputOutcomes);
+  }
+
+  // adapt-bmad sprint, story 3: README documents the adapt-bmad fast
+  // path and the BMad-side Verification section convention.
+  if (!filter || filter.test("README documents adapt-bmad fast path and verification convention")) {
+    console.log("[e2e] mini-run: README documents adapt-bmad fast path + verification convention");
+    const readmeAdaptBmadOutcomes = await runReadmeDocumentsAdaptBmadMiniRun();
+    outcomes.push(...readmeAdaptBmadOutcomes);
   }
 
   // Tenth mini-run (story 2): process-backlog end-of-run summary contract.
