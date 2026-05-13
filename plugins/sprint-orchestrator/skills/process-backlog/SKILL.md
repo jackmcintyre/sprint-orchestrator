@@ -29,8 +29,8 @@ Repeat until either `getReadyStories` returns `[]` or you have completed **5 sto
 5. Spawn a `reviewer` subagent for the same story ID via `Task`, passing both the story ID and the same agent ID you used in step 3. The reviewer will call `markStoryComplete`, `markStoryNeedsRework`, or `markStoryFailed` itself.
 6. After the reviewer returns, inspect its one-line status:
    - `done: <id>` — log it and move on to the next ready story.
-   - `rework: <id> — <reason>` — the reviewer left the claim in place and incremented `rework_count`. Re-spawn the `dev` subagent for the same story ID (it will read `last_review_feedback` from the story and address it), then re-spawn the `reviewer` for the same story and `agentId`. Repeat until the reviewer returns `done` or `blocked`. The `markStoryNeedsRework` tool enforces a cap (default 2) — once `capReached` is true the reviewer will escalate to `markStoryFailed` on its next pass, so the rework sub-loop terminates on its own.
-   - `blocked: <id> — <reason>` — log it and move on.
+   - `rework: <id> — <reason>` — the reviewer left the claim in place and incremented `rework_count`. Re-spawn the `dev` subagent for the same story ID (it will read `last_review_feedback` from the story and address it), then re-spawn the `reviewer` for the same story and `agentId`. Repeat until the reviewer returns `done` or `failed`. The `markStoryNeedsRework` tool enforces a cap (default 2) — once `capReached` is true the reviewer will escalate to `markStoryFailed` on its next pass, so the rework sub-loop terminates on its own.
+   - `failed: <id> — <reason>` — log it and move on.
 7. Loop.
 
 ## Rules

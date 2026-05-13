@@ -5,7 +5,7 @@ import { type ToolContext } from "./context.js";
 /**
  * Default rework cap. When `rework_count` reaches this value the response
  * carries `capReached: true` so the reviewer can decide to flip the story to
- * `blocked` via `markStoryFailed`. This tool itself never changes status —
+ * `failed` via `markStoryFailed`. This tool itself never changes status —
  * the story stays `in_progress` with `claimed_by` unchanged so the same dev
  * can take another swing.
  */

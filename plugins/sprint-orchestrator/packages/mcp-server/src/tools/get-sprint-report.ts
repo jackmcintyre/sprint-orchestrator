@@ -21,7 +21,14 @@ export interface SprintReport {
   rendered: string;
 }
 
-const STATUS_ORDER: StoryStatus[] = ["backlog", "ready", "in_progress", "done", "blocked"];
+const STATUS_ORDER: StoryStatus[] = [
+  "backlog",
+  "ready",
+  "in_progress",
+  "done",
+  "failed",
+  "blocked",
+];
 
 function emptyCounts(): SprintReportCounts {
   return {
@@ -29,6 +36,7 @@ function emptyCounts(): SprintReportCounts {
     ready: 0,
     in_progress: 0,
     done: 0,
+    failed: 0,
     blocked: 0,
   };
 }

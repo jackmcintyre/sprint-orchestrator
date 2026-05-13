@@ -228,12 +228,12 @@ describe("markStoryComplete", () => {
 });
 
 describe("markStoryFailed", () => {
-  it("transitions to blocked with reason", async () => {
+  it("transitions to failed with reason", async () => {
     const { ctx } = await setup();
     await markStoryFailed(ctx, "S1", "compiler exploded");
     const state = await getSprintStatus(ctx);
     const s1 = state.stories.find((s) => s.id === "S1")!;
-    expect(s1.status).toBe("blocked");
+    expect(s1.status).toBe("failed");
     expect(s1.orchestrator.last_failure_reason).toBe("compiler exploded");
   });
 });
@@ -407,10 +407,18 @@ describe("getSprintReport", () => {
       {
         id: "X1",
         title: "Failed story",
-        status: "blocked",
+        status: "failed",
         depends_on: [],
         acceptance_criteria: { checks: [] },
         orchestrator: { last_failure_reason: "dep missing" },
+      },
+      {
+        id: "K1",
+        title: "Blocked on external",
+        status: "blocked",
+        depends_on: [],
+        acceptance_criteria: { checks: [] },
+        orchestrator: { last_failure_reason: "waiting on vendor" },
       },
     ],
   };
@@ -424,9 +432,10 @@ describe("getSprintReport", () => {
       ready: 1,
       in_progress: 1,
       done: 1,
+      failed: 1,
       blocked: 1,
     });
-    expect(report.stories.map((s) => s.id).sort()).toEqual(["B1", "D1", "P1", "R1", "X1"]);
+    expect(report.stories.map((s) => s.id).sort()).toEqual(["B1", "D1", "K1", "P1", "R1", "X1"]);
     for (const story of fullSpread.stories) {
       expect(report.rendered).toContain(story.id);
       expect(report.rendered).toContain(story.title);
@@ -434,11 +443,18 @@ describe("getSprintReport", () => {
     expect(report.rendered).toContain("report-fixture");
   });
 
-  it("surfaces lastFailure for blocked stories", async () => {
+  it("renders failed and blocked as separate groups", async () => {
     const { ctx } = await setup(fullSpread as unknown as typeof baseSprint);
     const report = await getSprintReport(ctx);
-    const blocked = report.stories.find((s) => s.id === "X1");
-    expect(blocked?.lastFailure).toBe("dep missing");
+    expect(report.rendered).toContain("[failed] (1)");
+    expect(report.rendered).toContain("[blocked] (1)");
+  });
+
+  it("surfaces lastFailure for failed stories", async () => {
+    const { ctx } = await setup(fullSpread as unknown as typeof baseSprint);
+    const report = await getSprintReport(ctx);
+    const failed = report.stories.find((s) => s.id === "X1");
+    expect(failed?.lastFailure).toBe("dep missing");
     expect(report.rendered).toContain("dep missing");
   });
 

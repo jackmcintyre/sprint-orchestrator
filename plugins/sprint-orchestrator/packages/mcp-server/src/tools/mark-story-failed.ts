@@ -2,8 +2,11 @@ import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-sta
 import { type ToolContext } from "./context.js";
 
 /**
- * Mark a story as `blocked` with the supplied reason. Never retries silently;
+ * Mark a story as `failed` with the supplied reason. Never retries silently;
  * the human (or a later run) decides what to do next.
+ *
+ * Note: `failed` means the orchestrator gave up on this story. It is distinct
+ * from `blocked`, which is reserved for stories waiting on an external signal.
  *
  * @throws StoryNotFoundError, LockTimeoutError
  */
@@ -16,7 +19,7 @@ export async function markStoryFailed(
     const story = findStory(state, storyId);
     const updated = {
       ...story,
-      status: "blocked" as const,
+      status: "failed" as const,
       orchestrator: {
         ...story.orchestrator,
         last_failure_reason: reason,

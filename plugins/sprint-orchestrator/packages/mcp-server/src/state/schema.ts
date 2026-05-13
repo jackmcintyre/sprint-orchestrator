@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const StoryStatus = z.enum(["backlog", "ready", "in_progress", "done", "blocked"]);
+export const StoryStatus = z.enum(["backlog", "ready", "in_progress", "done", "failed", "blocked"]);
 export type StoryStatus = z.infer<typeof StoryStatus>;
 
 export const ShellCheck = z.object({

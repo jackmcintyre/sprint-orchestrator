@@ -125,7 +125,7 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
     "markStoryFailed",
     {
       title: "Mark story failed",
-      description: "Mark a story as blocked with a structured reason. No silent retries.",
+      description: "Mark a story as failed with a structured reason. No silent retries.",
       inputSchema: { storyId: z.string(), reason: z.string() },
     },
     async ({ storyId, reason }) => {

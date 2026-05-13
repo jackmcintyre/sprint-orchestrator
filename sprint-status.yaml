@@ -123,7 +123,7 @@ stories:
       explicit override).
   - id: "4"
     title: Unify failed vocabulary across status enum, run.log, and reports
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -139,7 +139,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix-4
+      claimed_at: 2026-05-13T00:41:52.545Z
     notes: |
       Today markStoryFailed sets status="blocked", but run.log writes outcome="failed",
       and the README/skill docs say "failed". Inconsistent vocabulary.
