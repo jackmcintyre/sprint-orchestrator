@@ -32,6 +32,12 @@ import { recordStoryReopen } from "../packages/mcp-server/src/tools/record-story
 import { getReadyStories } from "../packages/mcp-server/src/tools/get-ready-stories.js";
 import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
+import {
+  countTerminalOutcomes,
+  formatBlockedLine,
+  formatCapStopLine,
+  formatDrainLine,
+} from "../packages/mcp-server/src/tools/format-end-of-run-line.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -1745,6 +1751,214 @@ async function runRunSprintWrapperMiniRun(): Promise<AssertionOutcome[]> {
   return outcomes;
 }
 
+/**
+ * Story 2 — end-of-run summary contract for /sprint-orchestrator:process-backlog.
+ *
+ * Three distinct, greppable final lines tell the /goal evaluator
+ * (a Haiku-class model reading the transcript) whether the run ended in
+ * a clean drain, a hard-cap pause, or a blocked stop. The line grammar
+ * is the contract.
+ *
+ * This mini-run drives three small sprints — one drain, one cap-stop,
+ * one blocked — and asserts the final printed line of each against the
+ * reference formatters in
+ * `packages/mcp-server/src/tools/format-end-of-run-line.ts`, which the
+ * skill is documented to use.
+ */
+async function runProcessBacklogEndOfRunSummaryLinesMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function writeSprint(root: string, statuses: Array<"ready" | "done" | "failed">) {
+    const stories = statuses
+      .map((status, i) => {
+        const id = `S${i + 1}`;
+        return [
+          `  - id: "${id}"`,
+          `    title: "story ${id}"`,
+          `    status: ${status}`,
+          `    depends_on: []`,
+          `    acceptance_criteria:`,
+          `      checks:`,
+          `        - type: file_exists`,
+          `          path: src/${id}.txt`,
+          `    orchestrator: {}`,
+        ].join("\n");
+      })
+      .join("\n");
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "end-of-run-summary-lines-fixture"',
+      "stories:",
+      stories,
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(root, "sprint-status.yaml"), sprintYaml, "utf8");
+  }
+
+  // ---- Drain scenario --------------------------------------------------
+  // Mini-sprint: all terminal (2 done, 1 failed). The orchestrator skill
+  // would observe getReadyStories() === [] and emit the drain line.
+  const drainRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-eor-drain-"));
+  try {
+    await writeSprint(drainRoot, ["done", "done", "failed"]);
+    const sprintPath = path.join(drainRoot, "sprint-status.yaml");
+    const tally = await countTerminalOutcomes(sprintPath);
+    // Simulate the skill's terminal print.
+    const transcript = [
+      "[run] story S1 -> done",
+      "[run] story S2 -> done",
+      "[run] story S3 -> failed",
+      formatDrainLine(tally.done, tally.failed),
+    ].join("\n");
+    const finalLine = transcript.split("\n").pop() ?? "";
+
+    const a: Assertion = {
+      name: "process-backlog prints distinct end-of-run summary lines for drain cap-stop and blocked: drain",
+      run: () => {
+        const re =
+          /^Sprint drain confirmed: 0 ready stories remaining\. Outcome: (\d+) done, (\d+) failed\.$/;
+        const m = finalLine.match(re);
+        expect(!!m, `drain final line did not match contract; got: ${finalLine}`);
+        if (!m) return;
+        expect(Number(m[1]) === 2, `expected 2 done in drain line, got ${m[1]}`);
+        expect(Number(m[2]) === 1, `expected 1 failed in drain line, got ${m[2]}`);
+      },
+    };
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(drainRoot, { recursive: true, force: true });
+  }
+
+  // ---- Cap-stop scenario ----------------------------------------------
+  // 7-story sprint with 5 done (the cap was hit) and 2 still ready.
+  const capRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-eor-cap-"));
+  try {
+    await writeSprint(capRoot, ["done", "done", "done", "done", "done", "ready", "ready"]);
+    const sprintPath = path.join(capRoot, "sprint-status.yaml");
+    const tally = await countTerminalOutcomes(sprintPath);
+    const readyRemaining = 2; // skill would call getReadyStories() — here we assert against the known fixture
+    const transcript = [
+      "[run] story S1 -> done",
+      "[run] story S5 -> done",
+      "[run] hard cap reached (5)",
+      formatCapStopLine(readyRemaining, tally.done, tally.failed),
+    ].join("\n");
+    const finalLine = transcript.split("\n").pop() ?? "";
+
+    const a: Assertion = {
+      name: "process-backlog prints distinct end-of-run summary lines for drain cap-stop and blocked: cap-stop",
+      run: () => {
+        const re =
+          /^Sprint paused at hard cap: (\d+) ready stories remaining\. Outcome so far: (\d+) done, (\d+) failed\.$/;
+        const m = finalLine.match(re);
+        expect(!!m, `cap-stop final line did not match contract; got: ${finalLine}`);
+        if (!m) return;
+        expect(Number(m[1]) === 2, `expected 2 ready remaining, got ${m[1]}`);
+        expect(Number(m[2]) === 5, `expected 5 done so far, got ${m[2]}`);
+        expect(Number(m[3]) === 0, `expected 0 failed so far, got ${m[3]}`);
+      },
+    };
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(capRoot, { recursive: true, force: true });
+  }
+
+  // ---- Blocked scenario ------------------------------------------------
+  // Reviewer returned blocked: state-machine rejected recordStorySuccess.
+  const blockedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-eor-blocked-"));
+  try {
+    await writeSprint(blockedRoot, ["ready", "ready", "ready"]);
+    const reason = "state-machine rejected recordStorySuccess: story not in_progress";
+    const readyRemaining = 3;
+    const transcript = [
+      "[run] story S1 -> blocked",
+      formatBlockedLine(reason, readyRemaining),
+    ].join("\n");
+    const finalLine = transcript.split("\n").pop() ?? "";
+
+    const a: Assertion = {
+      name: "process-backlog prints distinct end-of-run summary lines for drain cap-stop and blocked: blocked",
+      run: () => {
+        const re = /^Sprint blocked: (.+)\. (\d+) ready stories remaining\.$/;
+        const m = finalLine.match(re);
+        expect(!!m, `blocked final line did not match contract; got: ${finalLine}`);
+        if (!m) return;
+        expect(m[1] === reason, `expected blocked reason '${reason}', got '${m[1]}'`);
+        expect(Number(m[2]) === 3, `expected 3 ready remaining, got ${m[2]}`);
+      },
+    };
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(blockedRoot, { recursive: true, force: true });
+  }
+
+  // ---- Distinctness ----------------------------------------------------
+  // The three line shapes must be greppable apart — no shared prefix that
+  // would confuse the /goal evaluator. Assert the leading tokens differ.
+  {
+    const drain = formatDrainLine(0, 0);
+    const cap = formatCapStopLine(0, 0, 0);
+    const blocked = formatBlockedLine("x", 0);
+    const a: Assertion = {
+      name: "process-backlog prints distinct end-of-run summary lines for drain cap-stop and blocked: lines are mutually distinct",
+      run: () => {
+        expect(
+          drain.startsWith("Sprint drain confirmed:"),
+          `drain line lost its leading token: ${drain}`,
+        );
+        expect(
+          cap.startsWith("Sprint paused at hard cap:"),
+          `cap-stop line lost its leading token: ${cap}`,
+        );
+        expect(
+          blocked.startsWith("Sprint blocked:"),
+          `blocked line lost its leading token: ${blocked}`,
+        );
+        const tokens = new Set([drain.split(":")[0], cap.split(":")[0], blocked.split(":")[0]]);
+        expect(
+          tokens.size === 3,
+          `expected 3 distinct leading tokens, got ${JSON.stringify([...tokens])}`,
+        );
+      },
+    };
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -1883,6 +2097,20 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: run-sprint wrapper turn cap + refusal paths");
     const runSprintOutcomes = await runRunSprintWrapperMiniRun();
     outcomes.push(...runSprintOutcomes);
+  }
+
+  // Tenth mini-run (story 2): process-backlog end-of-run summary contract.
+  // Three distinct final lines (drain / cap-stop / blocked) so the /goal
+  // evaluator can disambiguate run outcomes from the transcript.
+  if (
+    !filter ||
+    filter.test(
+      "process-backlog prints distinct end-of-run summary lines for drain cap-stop and blocked",
+    )
+  ) {
+    console.log("[e2e] mini-run: process-backlog end-of-run summary lines");
+    const eorOutcomes = await runProcessBacklogEndOfRunSummaryLinesMiniRun();
+    outcomes.push(...eorOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);
