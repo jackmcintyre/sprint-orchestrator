@@ -1,42 +1,37 @@
-# PR-per-story sprint 1.1 — branch-per-story (no push, no PR yet).
-#
-# Smallest useful slice of the PR-per-story workflow. When a user opts in via
-# config, each story's commits land on its own local branch instead of the
-# shared sprint branch. No remote interaction, no PR creation. That's slice
-# 1.2's job.
-#
-# Discipline: keep this small. Target ~250 lines of diff total.
-
 sprint_id: pr-per-story-sprint-1.1
 stories:
   - id: "1"
     title: Add pr_per_story and default_base to OrchestratorConfig (passive)
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-          pattern: "pr_per_story"
+          pattern: pr_per_story
         - type: regex
           cmd: cat plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
-          pattern: "default_base"
+          pattern: default_base
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-pps11-1
+      claimed_at: 2026-05-13T03:44:29.726Z
     notes: |
       Add two optional fields to OrchestratorConfig:
-        - pr_per_story?: boolean   // default false
+        - pr_per_story?: boolean   // default TRUE (PM call: this becomes
+                                   // the default workflow; existing
+                                   // shared-branch mode is the opt-out)
         - default_base?: string    // default "main"
 
       Read both from .sprint-orchestrator/config.yaml; pass through in the
       tool's return value. NO BEHAVIOR CHANGE in this story — the fields are
       consumed in story 2.
 
-      Tests: config without either field defaults pr_per_story=false; config
-      with explicit values round-trips.
-
+      Tests: config without either field defaults pr_per_story=true and
+      default_base="main"; explicit `pr_per_story: false` round-trips
+      (proves the opt-out works); explicit default_base="develop" round-trips.
   - id: "2"
     title: Branch-per-story when flag is on (local only, no push)
     status: ready
@@ -70,14 +65,21 @@ stories:
       Skill update: process-backlog calls prepareStoryBranch right after
       claimStory succeeds, before spawning the dev subagent.
 
-      E2E harness: extend the tiny-sprint fixture to also exercise a
-      pr_per_story=true config. Add a new assertion "branch-per-story: story
-      A's commits land on its own branch when flag is on". Existing 7
-      assertions must still pass (flag off by default in the existing run).
+      E2E harness: with pr_per_story now defaulting to TRUE, the fixture
+      sprint will exercise branch-per-story by default. Add a new assertion
+      "branch-per-story: story A's commits land on its own branch when flag
+      is on". The existing 7 assertions must continue to pass under the new
+      default (most are agnostic to which branch the commits land on; verify
+      no assertion has implicit branch-name expectations).
+
+      Add a second mini-run within the same e2e to exercise the
+      pr_per_story=false code path: spin up a second temp repo with the
+      flag explicitly off, drive one happy story, assert commits land on
+      the initial branch (not a feature branch). This guards the opt-out
+      path against future regressions.
 
       Out of scope (slice 1.2): pushing the branch, opening a PR, auto-merge,
       anything that touches origin or gh.
-
   - id: "3"
     title: Ship gate — pnpm e2e green
     status: ready

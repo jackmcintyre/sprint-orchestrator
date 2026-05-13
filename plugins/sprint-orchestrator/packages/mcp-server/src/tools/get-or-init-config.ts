@@ -23,6 +23,35 @@ export interface OrchestratorConfig {
    * themselves (the safe default).
    */
   force_release_stale?: number;
+  /**
+   * If true, the orchestrator workflow opens one PR per story (the new
+   * default). Set to `false` to opt out and use the legacy shared-branch
+   * mode. Defaults to `true` when omitted.
+   *
+   * NOTE: This field is currently passive — it is parsed and round-tripped
+   * through the config but no consumer reads it yet. Story 2 wires it in.
+   */
+  pr_per_story?: boolean;
+  /**
+   * Default base branch that per-story PRs are opened against. Defaults to
+   * `"main"` when omitted.
+   *
+   * NOTE: This field is currently passive — it is parsed and round-tripped
+   * through the config but no consumer reads it yet. Story 2 wires it in.
+   */
+  default_base?: string;
+}
+
+/** Defaults applied when a config omits the new pr-per-story fields. */
+const DEFAULT_PR_PER_STORY = true;
+const DEFAULT_BASE_BRANCH = "main";
+
+function withPrPerStoryDefaults(config: OrchestratorConfig): OrchestratorConfig {
+  return {
+    ...config,
+    pr_per_story: config.pr_per_story ?? DEFAULT_PR_PER_STORY,
+    default_base: config.default_base ?? DEFAULT_BASE_BRANCH,
+  };
 }
 
 export interface ConfigResult {
@@ -41,12 +70,12 @@ export interface ConfigResult {
  */
 export async function getOrInitConfig(ctx: ToolContext): Promise<ConfigResult> {
   const existing = await readExisting(ctx.configPath);
-  if (existing) return { config: existing, needsSetup: false };
+  if (existing) return { config: withPrPerStoryDefaults(existing), needsSetup: false };
 
   const detected = await detectBmadV6(ctx.projectRoot);
   if (detected) {
     await writeConfig(ctx.configPath, detected);
-    return { config: detected, needsSetup: false };
+    return { config: withPrPerStoryDefaults(detected), needsSetup: false };
   }
 
   return {
