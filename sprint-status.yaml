@@ -2,16 +2,36 @@ sprint_id: model-tiering-v1
 stories:
   - id: "1"
     title: Per-agent model defaults — frontmatter + config + resolveSpawnModel MCP tool
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "resolveSpawnModel respects frontmatter and config override"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "resolveSpawnModel respects frontmatter and
+            config override"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      claimed_by: dev-run-1763100000
+      claimed_at: 2026-05-13T23:16:24.263Z
+      rework_count: 0
+      completed_at: 2026-05-13T23:28:28.305Z
+      summary: Added per-agent model defaults via dev/reviewer frontmatter, optional config.models block,
+        and a new resolveSpawnModel MCP tool with phrase-locked SKILL.md spawn instruction.
+      artefacts:
+        - git:6640bbe50c92f6a717b2d39cad3e129fffed1a86
+        - plugins/sprint-orchestrator/agents/dev.md
+        - plugins/sprint-orchestrator/agents/reviewer.md
+        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/context.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/model-tiering-defaults.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/process-backlog-spawn-phrases.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/resolve-spawn-model.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
     notes: >
       PROBLEM: today every dev and reviewer Task spawn inherits the parent session's model. Jack's
       sessions run on Opus 4.7, so every routine implementation and review burns Opus tokens. The
@@ -116,15 +136,18 @@ stories:
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "resolveSpawnModel escalates dev on rework only"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "resolveSpawnModel escalates dev on rework
+            only"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
-      PROBLEM: even with Story 1's static defaults, a story that failed once at Sonnet will
-      retry at Sonnet — same model, same failure mode likely. The brief's locked v1 escalation
-      rule is "dev attempts after rework run on Opus." This story adds that one branch.
+      PROBLEM: even with Story 1's static defaults, a story that failed once at Sonnet will retry at
+      Sonnet — same model, same failure mode likely. The brief's locked v1 escalation rule is "dev
+      attempts after rework run on Opus." This story adds that one branch.
 
 
       DECISION: extend resolveSpawnModel (from Story 1) with a rework branch. Pseudocode:
@@ -141,8 +164,8 @@ stories:
         review still uses the reviewer's static-default tier.
 
 
-      DEEP_MODEL CONSTANT: add DEEP_MODEL = "claude-opus-4-7" to
-      model-tiering-defaults.ts (already created in Story 1).
+      DEEP_MODEL CONSTANT: add DEEP_MODEL = "claude-opus-4-7" to model-tiering-defaults.ts (already
+      created in Story 1).
 
 
       FILES TO TOUCH:
@@ -188,10 +211,12 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
       Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-2 integrate
       cleanly and don't regress existing assertions.
 
 
-      If this fails, the reviewer should rework the offending prior story, not record this one
-      as failed.
+      If this fails, the reviewer should rework the offending prior story, not record this one as
+      failed.
