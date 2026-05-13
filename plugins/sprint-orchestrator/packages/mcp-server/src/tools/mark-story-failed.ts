@@ -1,4 +1,5 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
+import { commitSprintState } from "../lib/commit-state.js";
 import { type ToolContext } from "./context.js";
 
 /**
@@ -27,4 +28,7 @@ export async function markStoryFailed(
     };
     return { next: replaceStory(state, updated), result: undefined };
   });
+
+  // Persist the state mutation as its own commit; idempotent when clean.
+  await commitSprintState(ctx.projectRoot, `chore(sprint): persist ${storyId} failure`);
 }

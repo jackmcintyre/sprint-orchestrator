@@ -1,5 +1,6 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
 import { ClaimConflictError, InvalidStateTransitionError } from "../lib/errors.js";
+import { commitSprintState } from "../lib/commit-state.js";
 import { type ToolContext } from "./context.js";
 
 /**
@@ -34,7 +35,7 @@ export async function markStoryNeedsRework(
   reason: string,
   reworkLimit: number = DEFAULT_REWORK_LIMIT,
 ): Promise<MarkStoryNeedsReworkResult> {
-  return updateSprintStatus(ctx.sprintStatusPath, async (state) => {
+  const result = await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
     const story = findStory(state, storyId);
     if (story.status !== "in_progress") {
       throw new InvalidStateTransitionError(storyId, story.status, "in_progress (rework)");
@@ -63,4 +64,9 @@ export async function markStoryNeedsRework(
       result: { reworkCount, capReached },
     };
   });
+
+  // Persist the state mutation as its own commit; idempotent when clean.
+  await commitSprintState(ctx.projectRoot, `chore(sprint): persist ${storyId} rework`);
+
+  return result;
 }

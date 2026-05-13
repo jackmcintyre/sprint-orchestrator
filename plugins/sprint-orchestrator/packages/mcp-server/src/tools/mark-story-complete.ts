@@ -4,6 +4,7 @@ import {
   ClaimConflictError,
   InvalidStateTransitionError,
 } from "../lib/errors.js";
+import { commitSprintState } from "../lib/commit-state.js";
 import { runChecks } from "../validators/acceptance.js";
 import { type ToolContext } from "./context.js";
 
@@ -34,7 +35,10 @@ export async function markStoryComplete(
 
     const result = await runChecks(story.acceptance_criteria.checks, { cwd: ctx.projectRoot });
     if (!result.passed) {
-      throw new AcceptanceFailedError(storyId, result.results.filter((r) => !r.passed));
+      throw new AcceptanceFailedError(
+        storyId,
+        result.results.filter((r) => !r.passed),
+      );
     }
 
     const updated = {
@@ -49,4 +53,10 @@ export async function markStoryComplete(
     };
     return { next: replaceStory(state, updated), result: undefined };
   });
+
+  // Persist the state mutation as its own `git commit` (touching ONLY
+  // sprint-status.yaml) so reverting a code commit does not roll back the
+  // orchestrator state machine. Idempotent: no-op when sprint-status.yaml is
+  // already clean (e.g. updateSprintStatus produced no textual diff).
+  await commitSprintState(ctx.projectRoot, `chore(sprint): persist ${storyId} completion`);
 }

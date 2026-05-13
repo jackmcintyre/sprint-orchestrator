@@ -2,7 +2,7 @@ sprint_id: orchestrator-bugfix-sprint-2
 stories:
   - id: "1"
     title: Build e2e harness — fixture sprint + pnpm e2e script
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -19,6 +19,14 @@ stories:
     orchestrator:
       claimed_by: dev-bugfix2-1
       claimed_at: 2026-05-13T01:45:52.068Z
+      completed_at: 2026-05-13T01:53:15.831Z
+      summary: Added tiny-sprint fixture and scripts/e2e.ts harness driving the orchestrator state machine
+        end-to-end, plus pnpm e2e script.
+      artefacts:
+        - git:56be0a5cb58af5d6fb81a81fccc18da9cbfae1a9
+        - plugins/sprint-orchestrator/__fixtures__/tiny-sprint/sprint-status.yaml
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/package.json
     notes: |
       Build a tiny end-to-end test harness that exercises the orchestrator
       against a real (but throwaway) git repo.
@@ -55,7 +63,7 @@ stories:
       fine — it sets the bar that other stories must clear.
   - id: "2"
     title: Wire markStoryComplete to commit sprint-status.yaml separately
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
     acceptance_criteria:
@@ -72,7 +80,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e -- --grep "two commits per happy-path story"
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-bugfix2-2
+      claimed_at: 2026-05-13T01:53:42.607Z
     notes: |
       ROOT CAUSE OF BUG 1: bugfix-1 story #1 added the
       `:!sprint-status.yaml` exclusion in commitStoryArtefacts but no
