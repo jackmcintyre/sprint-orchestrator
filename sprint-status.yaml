@@ -41,7 +41,7 @@ stories:
       (proves the opt-out works); explicit default_base="develop" round-trips.
   - id: "2"
     title: Branch-per-story when flag is on (local only, no push)
-    status: in_progress
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -55,6 +55,16 @@ stories:
     orchestrator:
       claimed_by: dev-pps11-2
       claimed_at: 2026-05-13T03:47:43.060Z
+      completed_at: 2026-05-13T03:55:40.855Z
+      summary: Added prepareStoryBranch MCP tool that creates a per-story branch from default_base when
+        pr_per_story is enabled (no-op otherwise), wired it into the process-backlog skill, and
+        extended the e2e harness with a branch-per-story assertion plus an opt-out mini-run.
+      artefacts:
+        - git:e60b661d1d5cc815e0d6cf855b132722f88a53b6
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/prepare-story-branch.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: |
       When pr_per_story is true, the orchestrator creates a per-story branch
       from default_base before the dev subagent starts work. The dev's commits
@@ -91,7 +101,7 @@ stories:
       anything that touches origin or gh.
   - id: "3"
     title: Ship gate — pnpm e2e green
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
       - "2"
@@ -103,7 +113,9 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-pps11-3
+      claimed_at: 2026-05-13T03:56:05.778Z
     notes: |
       Per the discipline rule documented in process-backlog/SKILL.md, every
       sprint ends with a ship gate story whose AC runs the full e2e suite.
