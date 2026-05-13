@@ -65,6 +65,17 @@ hits the cap):
 /sprint-orchestrator:run-sprint
 ```
 
+#### What you see on screen
+
+The wrapper computes the turn cap (see the formula below) and then
+prints two locked lines at the end of its output: a one-line
+fresh-context guidance note, followed by the canonical `/goal` command.
+The wrapper prints the canonical /goal command as the final line of its output, so you can triple-click the last line to copy it.
+
+Paste the /goal command in a fresh context window. A clean transcript gives the /goal evaluator the best chance of correctly deciding when the drain condition is met.
+
+Clipboard auto-copy of the /goal command was investigated this sprint but does not ship — it is tracked as a follow-up. See `_bmad-output/planning-artifacts/follow-ups.md` for the spike notes and promotion criteria.
+
 ### Computed turn cap
 
 The wrapper computes the cap as:

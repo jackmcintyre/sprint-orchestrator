@@ -55,6 +55,12 @@ import {
   ONE_WAY_COUPLING_STATEMENT,
   PRODUCER_EXAMPLE_FRAMING,
 } from "../packages/mcp-server/src/tools/readme-adopt-phrases.js";
+import {
+  CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT,
+  CLIPBOARD_OPT_OUT_INSTRUCTION,
+  FRESH_CONTEXT_RATIONALE,
+  GOAL_FINAL_LINE_STATEMENT,
+} from "../packages/mcp-server/src/tools/readme-runsprint-phrases.js";
 import { validateAcceptanceCriteria } from "../packages/mcp-server/src/tools/validate-acceptance-criteria.js";
 import { type ToolContext } from "../packages/mcp-server/src/tools/context.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
@@ -2535,6 +2541,123 @@ async function runReadmeDocumentsAdoptAndAdaptorPatternMiniRun(): Promise<Assert
 }
 
 /**
+ * goal-adoption sprint, story 3 — README documents the new run-sprint
+ * output flow: /goal printed as the literal last line, the fresh-context
+ * rationale for pasting it elsewhere, and the deferred clipboard
+ * auto-copy (Story 2's OSC 52 spike failed; see follow-ups.md).
+ *
+ * The locked phrases live in `readme-runsprint-phrases.ts` and are the
+ * single source of truth — README and assertions cannot drift.
+ */
+async function runReadmeDocumentsRunSprintLastLineMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  const readmePath = path.resolve(HERE, "..", "README.md");
+  let readme = "";
+  try {
+    readme = await fs.readFile(readmePath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: file readable",
+      passed: false,
+      error: `could not read README at ${readmePath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  function extractRunningSection(text: string): string | null {
+    const m = text.match(/\n##\s+Running a sprint\b[\s\S]*?(?=\n##\s+|\n?$)/);
+    return m ? m[0] : null;
+  }
+
+  const section = extractRunningSection(readme);
+
+  const checks: Assertion[] = [
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: running-a-sprint section exists",
+      run: () => {
+        expect(section !== null, "README is missing the '## Running a sprint' section");
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: fresh-context rationale present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(FRESH_CONTEXT_RATIONALE),
+          `Running-a-sprint section does not contain the fresh-context rationale verbatim. Expected: '${FRESH_CONTEXT_RATIONALE}'`,
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: /goal as final-line statement is present verbatim",
+      run: () => {
+        if (!section) return;
+        expect(
+          section.includes(GOAL_FINAL_LINE_STATEMENT),
+          `Running-a-sprint section does not describe /goal as the final line of output verbatim. Expected: '${GOAL_FINAL_LINE_STATEMENT}'`,
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: clipboard auto-copy is acknowledged as deferred with link to follow-ups.md",
+      run: () => {
+        if (!section) return;
+        // Spike-failed path (per follow-ups.md): README must NOT claim
+        // clipboard auto-copy exists. Instead, it must acknowledge the
+        // deferral verbatim and point at the follow-ups tracker.
+        expect(
+          section.includes(CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT),
+          `Running-a-sprint section does not contain the deferred-clipboard acknowledgement verbatim. Expected: '${CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT}'`,
+        );
+        expect(
+          section.includes("follow-ups.md"),
+          "Running-a-sprint section does not link to follow-ups.md alongside the deferred-clipboard acknowledgement",
+        );
+        // Inert export — must not be presented as a live opt-out
+        // instruction in the deferred path. Guard against accidental
+        // adoption of the auto-copy phrasing.
+        expect(
+          !section.includes(CLIPBOARD_OPT_OUT_INSTRUCTION),
+          "Running-a-sprint section presents the OSC 52 opt-out instruction as live, but Story 2's spike failed — the clipboard auto-copy path is deferred. Use CLIPBOARD_DEFERRED_ACKNOWLEDGEMENT instead.",
+        );
+      },
+    },
+    {
+      name: "README documents run-sprint last-line fresh-context and clipboard flow: prior sprint content preserved",
+      run: () => {
+        // Guard against accidental deletion of the prior sprint's content.
+        expect(
+          /ceil\(\s*story_count\s*\*\s*turn_cap_per_story\s*\)/.test(readme),
+          "README no longer documents the cap formula 'ceil(story_count * turn_cap_per_story)' — story 3 edits must not delete prior sprint content",
+        );
+        expect(
+          readme.includes("Sprint drain confirmed:") &&
+            readme.includes("Sprint paused at hard cap:") &&
+            readme.includes("Sprint blocked:"),
+          "README no longer documents all three end-of-run summary prefixes — story 3 edits must not delete prior sprint content",
+        );
+      },
+    },
+  ];
+
+  for (const a of checks) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  return outcomes;
+}
+
+/**
  * Story 1.2 — deterministic e2e coverage for the adopt validate-and-write path.
  *
  * Exercises `validateAndWriteBacklog` directly (the LLM drafting step is an
@@ -2870,6 +2993,20 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: README documents adopt and the adaptor pattern");
     const readmeAdoptOutcomes = await runReadmeDocumentsAdoptAndAdaptorPatternMiniRun();
     outcomes.push(...readmeAdoptOutcomes);
+  }
+
+  // goal-adoption sprint, story 3: README documents the new run-sprint output
+  // flow — /goal as the literal last line, fresh-context rationale, and the
+  // deferred clipboard auto-copy (Story 2 spike failed; see follow-ups.md).
+  if (
+    !filter ||
+    filter.test("README documents run-sprint last-line fresh-context and clipboard flow")
+  ) {
+    console.log(
+      "[e2e] mini-run: README documents run-sprint last-line + fresh-context + clipboard",
+    );
+    const readmeRunSprintOutputOutcomes = await runReadmeDocumentsRunSprintLastLineMiniRun();
+    outcomes.push(...readmeRunSprintOutputOutcomes);
   }
 
   // Tenth mini-run (story 2): process-backlog end-of-run summary contract.
