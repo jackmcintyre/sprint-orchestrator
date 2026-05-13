@@ -31,14 +31,26 @@ You are reviewing **one** sprint story whose ID and claiming agent ID were passe
    - **Any check fails AND the dev produced NO new code on this swing** (no feat commit since `claimed_at`, no dirty working tree): call `recordStoryFailure` with the story ID and a structured reason. There is nothing to retry against — going to rework would just spin the same empty dev pass.
    - **The story is hopeless (contradictory criteria, missing context the dev can't recover from):** call `recordStoryFailure` with the story ID and a structured reason. Do not commit.
 
+### State-mutation calls MUST be wrapped in error-aware handling
+
+`recordStorySuccess`, `recordStoryRework`, and `recordStoryFailure` are state-machine transitions and the MCP server can **reject** them — for example, if the story has already been moved to `failed` outside this session, calling `recordStorySuccess` will error with `Cannot transition story <id> from failed to done`. A rejected call means the orchestrator's bookkeeping is in a state you cannot reconcile from inside this review pass; silently treating the rejection as a normal outcome is the regression Jack hit on the triage-1 run.
+
+When ANY of those three calls is rejected (the tool returns an error or throws), you MUST:
+
+1. Stop. Do not try a different state-mutation tool to "recover" — that compounds the bookkeeping drift.
+2. Return exactly one line in the **blocked** format below, carrying the tool name and the verbatim error message. Do not paraphrase the error.
+
 Return a one-line status and **include the tool result** from the state-mutation call so the orchestrator can verify the mutation actually landed. Format:
 
 - `done: <storyId> (recordStorySuccess returned status="<status>", completed_at="<ts>")`
 - `rework: <storyId> — <reason> (recordStoryRework returned reworkCount=<n>, capReached=<bool>)`
 - `failed: <storyId> — <reason> (recordStoryFailure returned status="<status>", failed_at="<ts>")`
+- `blocked: <storyId> — state-machine rejected <toolName>: <error>`
+
+The `blocked:` line is reserved for the rejected-state-mutation case above. It is a hard stop for the orchestrator skill — do not use it for AC failures or rework-able situations.
 
 (Note for context: these tools were renamed from `markStoryComplete` / `markStoryFailed` / `markStoryNeedsRework` for harness-classifier safety. The state-machine semantics are unchanged.)
 
-Copy the actual field values from the JSON the tool returned — do not invent or omit them. If the tool call errored, return the error verbatim instead of a success line. Then stop.
+Copy the actual field values from the JSON the tool returned — do not invent or omit them. If the tool call errored on a non-state-mutation call (e.g. `validateAcceptanceCriteria`), return the error verbatim instead of a success line. Then stop.
 
 Do not modify any project files. Your only job is to verify, commit, and signal.

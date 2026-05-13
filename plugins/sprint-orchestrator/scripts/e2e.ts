@@ -1040,6 +1040,170 @@ async function runReviewerReworkOnFirstACMissMiniRun(): Promise<AssertionOutcome
   return outcomes;
 }
 
+/**
+ * Mini-run for story 2: when the reviewer attempts a state-mutating MCP call
+ * on a story whose status no longer allows that transition (e.g. another
+ * session moved it to `failed`), the MCP server rejects the call. The
+ * reviewer's contract is to surface a `blocked: <id>` status line and STOP
+ * the run — NOT to silently treat the rejection as a normal `done`/`failed`
+ * outcome.
+ *
+ * The e2e cannot drive the reviewer LLM directly, so this mini-run drives the
+ * MCP-side state machine the reviewer is supposed to commit to:
+ *   1. Pre-seed story C in `failed` state (simulating the cross-session drift).
+ *   2. Re-claim it for a "new" reviewer agent (without going through the
+ *      normal claimStory state-machine path — we hand-edit sprint-status so
+ *      the story is in_progress-looking only insofar as the reviewer would
+ *      try to call recordStorySuccess on it).
+ *   3. Attempt `markStoryComplete` (the dist-mode name for the tool the
+ *      reviewer calls). Expect it to throw `InvalidStateTransitionError`.
+ *   4. Mimic the reviewer's contract: write a `blocked` event into run.log
+ *      and synthesize the `blocked: <id> ...` stdout line.
+ *   5. Assert: story.status stays `failed`, the synthesized stdout line
+ *      matches the contract, and run.log carries a `blocked` event with the
+ *      offending tool name and error.
+ */
+async function runReviewerBlockedOnRejectedTransitionMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const agent = "agent-blocked-on-rejected-transition";
+  const outcomes: AssertionOutcome[] = [];
+
+  try {
+    // Step 1: pre-seed C in `failed` state via the normal path (this is the
+    // "prior session" leaving the bookkeeping in a state the new reviewer
+    // cannot transition out of).
+    const claim1 = await claimStory(ctx, "C", "agent-prior-session");
+    if (!claim1.claimed) throw new Error(`could not claim C: holder=${claim1.holder ?? "?"}`);
+    await markStoryFailed(ctx, "C", "prior session gave up");
+
+    // Sanity: story is now `failed`.
+    const midState = await readSprintStatus(ctx.sprintStatusPath);
+    const midC = midState.stories.find((s) => s.id === "C");
+    if (!midC || midC.status !== "failed") {
+      throw new Error(`expected C status=failed before reviewer pass, got ${String(midC?.status)}`);
+    }
+
+    // Step 2: the reviewer LLM is invoked for C with `agent`. The reviewer
+    // believes AC has passed (this is what it would do in a re-claimed
+    // scenario where it doesn't re-check the persisted status) and calls
+    // recordStorySuccess. We simulate that call directly.
+    //
+    // Step 3: expect rejection.
+    let captured: Error | null = null;
+    try {
+      await markStoryComplete(ctx, "C", agent, "reviewer believes C is done");
+    } catch (err) {
+      captured = err as Error;
+    }
+
+    // Step 4: mimic the reviewer's blocked-line contract + run.log event.
+    const toolName = "recordStorySuccess";
+    const errorText = captured ? captured.message : "<no error thrown>";
+    const reviewerStdoutLine = `blocked: C — state-machine rejected ${toolName}: ${errorText}`;
+    if (captured) {
+      await appendRunLog(root, {
+        event: "blocked",
+        at: new Date().toISOString(),
+        story_id: "C",
+        tool: toolName,
+        error: errorText,
+        agent_id: agent,
+      });
+    }
+
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyC = finalState.stories.find((s) => s.id === "C");
+    const log = await readLog(root);
+
+    const checks: Assertion[] = [
+      {
+        name: "reviewer returns blocked status when state machine rejects recordStorySuccess",
+        run: () => {
+          // The MCP server must have rejected the transition.
+          expect(
+            captured !== null,
+            "expected markStoryComplete to throw on a failed story; got no error",
+          );
+          // Error message must carry the from/to context so the blocked: line is informative.
+          expect(
+            captured!.message.includes("failed") && captured!.message.includes("done"),
+            `expected error to mention failed→done transition, got: ${captured!.message}`,
+          );
+          // Reviewer's synthesized stdout line matches the contract.
+          expect(
+            reviewerStdoutLine.startsWith("blocked: C"),
+            `expected stdout line to start with "blocked: C", got: ${reviewerStdoutLine}`,
+          );
+          expect(
+            reviewerStdoutLine.includes(`state-machine rejected ${toolName}`),
+            `expected stdout line to name the rejected tool, got: ${reviewerStdoutLine}`,
+          );
+          expect(
+            reviewerStdoutLine.includes(captured!.message),
+            `expected stdout line to carry the verbatim error, got: ${reviewerStdoutLine}`,
+          );
+          // Story status must remain `failed` — no silent transition happened.
+          expect(!!storyC, "story C missing from final state");
+          expect(
+            storyC!.status === "failed",
+            `story C status=${storyC!.status} (expected "failed"; rejected transition must not mutate state)`,
+          );
+          // run.log must carry a `blocked` event so post-mortem analysis can find it.
+          const blocked = log.filter((e) => e.event === "blocked");
+          expect(
+            blocked.length >= 1,
+            `expected >=1 blocked event in run.log, got ${blocked.length}`,
+          );
+          const evt = blocked.find((e) => e.story_id === "C");
+          expect(!!evt, "no blocked event for story C in run.log");
+          expect(
+            evt!.tool === toolName,
+            `blocked event tool=${String(evt!.tool)} (expected ${toolName})`,
+          );
+          expect(
+            typeof evt!.error === "string" &&
+              (evt!.error as string).includes("failed") &&
+              (evt!.error as string).includes("done"),
+            `blocked event error missing transition context, got: ${String(evt!.error)}`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const filter = args.grep ? new RegExp(args.grep) : null;
@@ -1124,6 +1288,19 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: reviewer escalates to rework on first AC miss with dev code");
     const reworkOutcomes = await runReviewerReworkOnFirstACMissMiniRun();
     outcomes.push(...reworkOutcomes);
+  }
+
+  // Sixth mini-run: reviewer must return `blocked: <id>` when the MCP server
+  // rejects a state-mutating call (and the orchestrator skill must treat that
+  // as a hard stop). Guards the cross-session bookkeeping-drift regression
+  // from the triage-1 run.
+  if (
+    !filter ||
+    filter.test("reviewer returns blocked status when state machine rejects recordStorySuccess")
+  ) {
+    console.log("[e2e] mini-run: reviewer returns blocked when state machine rejects mutation");
+    const blockedOutcomes = await runReviewerBlockedOnRejectedTransitionMiniRun();
+    outcomes.push(...blockedOutcomes);
   }
 
   const failed = outcomes.filter((o) => !o.passed);
