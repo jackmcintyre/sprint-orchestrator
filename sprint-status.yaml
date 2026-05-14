@@ -19,15 +19,15 @@ stories:
     orchestrator:
       claimed_by: dev-2026-05-14-s1
       claimed_at: 2026-05-14T03:17:50.371Z
+      completed_at: 2026-05-14T03:25:55.100Z
+      summary: Added dev_returned_at guard to schema and state machine so recordStoryFailure and
+        validateAcceptanceCriteria refuse until the dev subagent marks its return via the new
+        markDevReturned tool; all 3 ACs pass.
       rework_count: 0
       base_branch: main
       branch: 1-acs-only-evaluate-after-the-dev-subagent
       branch_prepared_by: dev-2026-05-14-s1
       branch_prepared_at: 2026-05-14T03:17:53.448Z
-      completed_at: 2026-05-14T03:25:55.100Z
-      summary: Added dev_returned_at guard to schema and state machine so recordStoryFailure and
-        validateAcceptanceCriteria refuse until the dev subagent marks its return via the new
-        markDevReturned tool; all 3 ACs pass.
       artefacts:
         - git:e4c96bb6faf87d61b42c27c11529c966740ede1f
         - plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
@@ -79,10 +79,12 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      completed_at: 2026-05-14T03:40:05.414Z
+      summary: Added failure_details array to schema and mark-story-failed path; captures
+        cmd/exit_code/expected_exit/stdout/stderr/recorded_at per failed check; new e2e mini-run
+        runStructuredFailureDetailsMiniRun. Shipped via PR
       rework_count: 0
       branch: 2-structured-failure-details-replace-opaqu
-      completed_at: 2026-05-14T03:40:05.414Z
-      summary: Added failure_details array to schema and mark-story-failed path; captures cmd/exit_code/expected_exit/stdout/stderr/recorded_at per failed check; new e2e mini-run runStructuredFailureDetailsMiniRun. Shipped via PR #30.
       artefacts:
         - git:4a305fd
     notes: >
@@ -116,7 +118,7 @@ stories:
         failure_details[0].exit_code matches reality.
   - id: "3"
     title: prepareStoryBranch understands dependency-rooted bases
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -128,7 +130,14 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-2026-05-14-s3
+      claimed_at: 2026-05-14T03:41:22.115Z
       rework_count: 0
+      base_branch: main
+      branch: 3-preparestorybranch-understands-dependenc
+      branch_prepared_by: dev-2026-05-14-s3
+      branch_prepared_at: 2026-05-14T03:41:25.630Z
+      dev_returned_at: 2026-05-14T03:44:31.140Z
     notes: >
       With pr_per_story=true, story N+1's prepareStoryBranch today roots off default_base instead of
       story N's branch tip. Two failure modes observed: explicit default_base-stale refusal, AND
