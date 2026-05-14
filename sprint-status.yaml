@@ -76,10 +76,10 @@ stories:
     orchestrator:
       claimed_by: dev-1747268400-s2
       claimed_at: 2026-05-14T01:25:14.636Z
-      rework_count: 0
       completed_at: 2026-05-14T01:29:04.331Z
       summary: Added examples/hello-sprint/ with a 2-story sprint-status.yaml and README, no node deps,
         all 7 acceptance checks pass.
+      rework_count: 0
       artefacts:
         - examples/hello-sprint/sprint-status.yaml
         - examples/hello-sprint/README.md
@@ -173,7 +173,7 @@ stories:
       Open question for Jack: is the repo URL public? The clone command needs that confirmation.
   - id: "5"
     title: First-run pr_per_story setup prompt
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -203,6 +203,8 @@ stories:
           expect_exit: 0
     orchestrator:
       rework_count: 0
+      claimed_by: dev-1747268400-s5
+      claimed_at: 2026-05-14T01:29:12.512Z
     notes: >
       Make pr_per_story a deliberate choice at first-run, not a silent default inheriting Jack's
       solo-dog-fooding posture. New phrase-lock module PR_PER_STORY_SETUP_PROMPT in
