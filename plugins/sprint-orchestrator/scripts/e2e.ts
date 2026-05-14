@@ -3452,6 +3452,17 @@ async function main(): Promise<number> {
     outcomes.push(...depBaseOutcomes);
   }
 
+  // orchestrator-hardening sprint, story 4: recordStorySuccess refuses when
+  // pr_per_story=true and the branch has not been pushed / a PR does not exist.
+  if (
+    !filter ||
+    filter.test("recordStorySuccess refuses when pr_per_story=true and branch is unpushed")
+  ) {
+    console.log("[e2e] mini-run: recordStorySuccess pr_per_story enforcement");
+    const prEnforcementOutcomes = await runPrPerStoryEnforcementMiniRun();
+    outcomes.push(...prEnforcementOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -4993,6 +5004,137 @@ async function runPrepareStoryBranchDependencyBaseMiniRun(): Promise<AssertionOu
     } finally {
       await fs.rm(tmp2, { recursive: true, force: true });
     }
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * orchestrator-hardening sprint, story 4 — recordStorySuccess refuses when
+ * pr_per_story=true and the branch has not been pushed to origin and/or no
+ * open PR exists for the branch.
+ *
+ * Uses a real temp git repo with NO remote so the push check fails, and NO
+ * gh shim so the PR check also fails. Asserts that markStoryComplete returns
+ * a PrPerStoryRefusalResult instead of marking the story done.
+ *
+ * Grep tag: "recordStorySuccess refuses when pr_per_story=true and branch is unpushed"
+ */
+async function runPrPerStoryEnforcementMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-pr-enforce-"));
+  try {
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    // Single story that passes its acceptance criteria (true exit-0 check).
+    const sprintYaml = [
+      "schema_version: 1",
+      "sprint_id: pr-enforce-test",
+      "stories:",
+      "  - id: s1",
+      "    title: Test story",
+      "    status: ready",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: shell",
+      '          cmd: "exit 0"',
+      "          exit_code: 0",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+
+    await fs.writeFile(path.join(tmp, "sprint-status.yaml"), sprintYaml, "utf8");
+    g(["add", "sprint-status.yaml"]);
+    g(["commit", "-q", "-m", "init"]);
+
+    // Config with pr_per_story: true — no remote exists in this repo.
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // Claim and prepare a branch so orchestrator.branch is set on the story.
+    await claimStory(ctx, "s1", "agent-test");
+    await prepareStoryBranch(ctx, "s1", "agent-test");
+
+    // Attempt to mark done — should be refused because branch is not pushed
+    // and there is no open PR.
+    const result = await markStoryComplete(ctx, "s1", "agent-test", "test summary");
+
+    await runOne({
+      name: "recordStorySuccess refuses when pr_per_story=true and branch is unpushed: returns ok=false with reason pr_per_story_requires_pushed_pr",
+      run: () => {
+        expect(
+          "ok" in result && result.ok === false,
+          `expected ok=false refusal but got: ${JSON.stringify(result)}`,
+        );
+        if (!("ok" in result) || result.ok !== false) return;
+        expect(
+          result.reason === "pr_per_story_requires_pushed_pr",
+          `expected reason=pr_per_story_requires_pushed_pr, got ${String(result.reason)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "recordStorySuccess refuses when pr_per_story=true and branch is unpushed: missing array includes 'push'",
+      run: () => {
+        if (!("ok" in result) || result.ok !== false) {
+          throw new Error(`result was not a refusal: ${JSON.stringify(result)}`);
+        }
+        expect(
+          result.details.missing.includes("push"),
+          `expected 'push' in missing array, got ${JSON.stringify(result.details.missing)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "recordStorySuccess refuses when pr_per_story=true and branch is unpushed: story remains in_progress (not marked done)",
+      run: async () => {
+        const state = await readSprintStatus(ctx.sprintStatusPath);
+        const story = state.stories.find((s) => s.id === "s1");
+        expect(
+          story?.status === "in_progress",
+          `expected story status=in_progress after refusal, got ${String(story?.status)}`,
+        );
+      },
+    });
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
