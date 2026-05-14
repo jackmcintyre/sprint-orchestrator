@@ -248,7 +248,7 @@ stories:
       via in-memory MCP client. Do NOT reinvent; copy the resolveSpawnModel mini-run shape.
   - id: "6"
     title: Ship gate — pnpm e2e + pnpm verify green + manual install-from-clean smoketest
-    status: in_progress
+    status: done
     depends_on:
       - "1"
       - "2"
@@ -319,6 +319,13 @@ stories:
 
         - Preserves all prior sprint content already in the file
       last_review_at: 2026-05-14T01:47:14.189Z
+      completed_at: 2026-05-14T01:52:28.554Z
+      summary: "All ship-gate checks pass: 101/101 e2e assertions green, pnpm verify clean,
+        examples/hello-sprint files present, both READMEs present — including the '## Running a
+        sprint' section added on rework."
+      artefacts:
+        - git:4edde4ee2a05871f7ef03c0525620152150aa8a6
+        - plugins/sprint-orchestrator/README.md
     notes: |
       Verification-only ship gate per planning-discipline Rule 3. Mechanical gates (e2e + verify + presence of bundled example + presence of both READMEs) are checked above. The MANUAL gate — Jack clearing the plugin cache, following the README install path from cold, and running the example sprint to drain in under 10 minutes — is recorded out-of-band in the reviewer summary before recordStorySuccess.
 
