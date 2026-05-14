@@ -202,7 +202,7 @@ stories:
           cmd: grep -qE "git status|uncommitted|dirty" plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
           expect_exit: 0
         - type: shell
-          cmd: grep -q UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools
+          cmd: grep -rq UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools
           expect_exit: 0
         - type: shell
           cmd: grep -q "Commit sprint-status.yaml" _bmad-output/planning-artifacts/planning-discipline.md
@@ -230,10 +230,6 @@ stories:
         repair."
       last_review_at: 2026-05-14T09:07:00.771Z
       base_branch: main
-      dev_returned_at: 2026-05-14T09:02:25.103Z
-      branch: 3-run-sprint-refuses-to-launch-with-uncomm
-      branch_prepared_by: dev-90219e38-s3
-      branch_prepared_at: 2026-05-14T08:54:45.808Z
       reopen_history:
         - reopened_at: 2026-05-14T09:26:48.233Z
           reason: "story 3's persist-3-completion commit (9325c5c) didn't make it onto PR #36 before merge;
@@ -241,6 +237,10 @@ stories:
           prior_status: failed
           prior_failure_reason: "Acceptance criteria failed: shell"
           reopened_by_agent_id: human-jack
+      dev_returned_at: 2026-05-14T10:04:56.139Z
+      branch: 3-run-sprint-refuses-to-launch-with-uncomm
+      branch_prepared_by: dev-ade78844-s3
+      branch_prepared_at: 2026-05-14T10:03:55.547Z
     notes: >
       During the hardening sprint launch, sprint-status.yaml was never committed. When PR #29 merged
       to main, the merge overwrote the live backlog file. Manual recovery from a dangling git blob
