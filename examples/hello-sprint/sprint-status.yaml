@@ -1,0 +1,33 @@
+sprint_id: hello-sprint
+schema_version: 1
+stories:
+  - id: "1"
+    title: Create the HELLO file
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: file_exists
+          path: HELLO.md
+        - type: shell
+          cmd: grep -q "hello from sprint-orchestrator" HELLO.md
+          expect_exit: 0
+    orchestrator: {}
+    notes: >
+      Create a file at HELLO.md (inside this directory, examples/hello-sprint/)
+      containing exactly the line:
+      hello from sprint-orchestrator
+  - id: "2"
+    title: Ship gate — HELLO file is present
+    status: ready
+    depends_on: ["1"]
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: test -f HELLO.md && grep -q "hello from sprint-orchestrator" HELLO.md
+          expect_exit: 0
+    orchestrator: {}
+    notes: >
+      Verification-only ship gate per planning-discipline Rule 3 — every sprint
+      ends with a ship gate. This story requires no code change; its job is to
+      prove the prior story landed correctly.
