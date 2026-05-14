@@ -1,260 +1,164 @@
-sprint_id: mvp-polish
+sprint_id: smoketest-followups
+# Source: 2026-05-14 manual install-from-clean smoketest after mvp-polish.
+# Four real issues surfaced; each becomes a story below. Ship gate as story 5.
 stories:
   - id: "1"
-    title: Remove abandoned-SDK-runner cruft and stale repo-root docs
-    status: done
+    title: Reviewer scope guardrail — only touch the assigned story
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: test "$(grep -rE 'sdk-runner|@anthropic-ai/claude-agent-sdk' plugins/sprint-orchestrator
-            --exclude-dir=node_modules --exclude-dir=dist | wc -l)" -eq 0
+          cmd: grep -q "ONLY operate on the storyId" plugins/sprint-orchestrator/agents/reviewer.md
           expect_exit: 0
         - type: shell
-          cmd: test ! -d plugins/sprint-orchestrator/packages/sdk-runner
+          cmd: "grep -qE 'storyId.*mismatch|wrong.story' plugins/sprint-orchestrator/packages/mcp-server/src/tools/record-story-success.ts"
           expect_exit: 0
         - type: shell
-          cmd: test ! -f project.md
-          expect_exit: 0
-        - type: shell
-          cmd: git ls-files plugins/sprint-orchestrator/docs/example-config.yaml | grep -q example-config.yaml
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q example-config plugins/sprint-orchestrator/README.md
-          expect_exit: 0
-        - type: shell
-          cmd: test ! -f plugins/sprint-orchestrator/.sprint-orchestrator/run.log
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "reviewer scope guardrail"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-1747268400-s1
-      claimed_at: 2026-05-14T01:21:19.103Z
-      completed_at: 2026-05-14T01:25:07.497Z
-      summary: Deleted the orphan sdk-runner package, removed stale project.md, moved example-config.yaml
-        to plugins/sprint-orchestrator/docs/ (tracked in git, linked from README), and cleaned up
-        the stale run.log; all 127 tests pass.
-      rework_count: 0
-      artefacts:
-        - git:7c0477a6cf4659da46aae03a7947e4408b29084a
-        - plugins/sprint-orchestrator/docs/example-config.yaml
-        - plugins/sprint-orchestrator/README.md
-    notes: |
-      Cleanup: delete the orphan sdk-runner package, delete stale project.md at repo root, move the example config out of the gitignore-trapped .sprint-orchestrator/ directory to plugins/sprint-orchestrator/docs/example-config.yaml (track it, link it from the plugin README), and delete cruft run.log under the plugin's .sprint-orchestrator/.
+    notes: >
+      During the mvp-polish smoketest, the reviewer subagent spawned for story 1 silently
+      processed story 2 as well — both stories ended up done with a single explicit dev/reviewer
+      pair. That breaks the audit trail and the one-story-at-a-time concurrency guarantee.
 
-      Full developer context in _bmad-output/implementation-artifacts/1-1-remove-abandoned-sdk-runner-cruft-and-stale-repo-root-docs.md.
 
-      DO NOT touch the repo-root .gitignore line `.sprint-orchestrator/` — it protects real runtime state. The replacement example config must live at a path that doesn't match that pattern.
+      Two layers of defence required:
+        1. Reviewer agent prompt (`plugins/sprint-orchestrator/agents/reviewer.md`) must
+           explicitly say "ONLY operate on the storyId you were given. Never call
+           recordStorySuccess / recordStoryRework / recordStoryFailure for any other story."
+        2. The recordStory* MCP tools should sanity-check that the story being recorded
+           matches the agentId's claim — surface a structured rejection if a reviewer is
+           trying to record success for a story it didn't claim.
+
+
+      New e2e test "reviewer scope guardrail" must assert: a reviewer that tries to record
+      success for a non-claimed story is rejected by the MCP layer with a clear error.
+
   - id: "2"
-    title: Bundled examples/hello-sprint/ quickstart
-    status: done
+    title: Reviewer must push branch before opening PR
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: test -d examples/hello-sprint
+          cmd: grep -qE "git push.*-u origin|git push.*--set-upstream" plugins/sprint-orchestrator/agents/reviewer.md
           expect_exit: 0
         - type: shell
-          cmd: git ls-files examples/hello-sprint/sprint-status.yaml | grep -q sprint-status.yaml
+          cmd: grep -q "before calling gh pr create" plugins/sprint-orchestrator/agents/reviewer.md
           expect_exit: 0
         - type: shell
-          cmd: git ls-files examples/hello-sprint/README.md | grep -q README.md
-          expect_exit: 0
-        - type: shell
-          cmd: test ! -f examples/hello-sprint/package.json
-          expect_exit: 0
-        - type: shell
-          cmd: test ! -d examples/hello-sprint/node_modules
-          expect_exit: 0
-        - type: shell
-          cmd: test "$(grep -c '^  - id:' examples/hello-sprint/sprint-status.yaml)" -eq 2
-          expect_exit: 0
-        - type: shell
-          cmd: "grep -qE 'type: (shell|file_exists)' examples/hello-sprint/sprint-status.yaml"
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-1747268400-s2
-      claimed_at: 2026-05-14T01:25:14.636Z
-      completed_at: 2026-05-14T01:29:04.331Z
-      summary: Added examples/hello-sprint/ with a 2-story sprint-status.yaml and README, no node deps,
-        all 7 acceptance checks pass.
-      rework_count: 0
-      artefacts:
-        - examples/hello-sprint/sprint-status.yaml
-        - examples/hello-sprint/README.md
-        - git:0762cb70bbe075d7420acf2ec2f737997cf2d7b4
-    notes: >
-      Create examples/hello-sprint/ — minimal bundled example sprint that proves the loop end-to-end
-      in under 5 minutes. Contains orchestrator-schema sprint-status.yaml with 2 stories (trivial
-      implementation creates HELLO.md with the line "hello from sprint-orchestrator", ship gate
-      grep-checks the file), plus a one-page README walking the reader through running it.
-
-
-      Full developer context in
-      _bmad-output/implementation-artifacts/1-2-bundled-examples-hello-sprint-quickstart.md.
-
-
-      HARD CONSTRAINT: zero node deps — no package.json, no node_modules, runnable on a fresh clone
-      with no pnpm install step.
-  - id: "3"
-    title: Outside-in READMEs (root + plugin) with cost transparency
-    status: done
-    depends_on:
-      - "1"
-      - "2"
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: test -f README.md && git ls-files README.md | grep -q README.md
-          expect_exit: 0
-        - type: shell
-          cmd: test "$(wc -l < README.md)" -lt 200
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q examples/hello-sprint README.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q plugins/sprint-orchestrator/README README.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q Sonnet plugins/sprint-orchestrator/README.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q Opus plugins/sprint-orchestrator/README.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q "Claude Code session model is unaffected" plugins/sprint-orchestrator/README.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q docs/example-config plugins/sprint-orchestrator/README.md
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-1747268400-s3
-      claimed_at: 2026-05-14T01:35:24.090Z
-      completed_at: 2026-05-14T01:39:03.450Z
-      summary: "feat(3): Outside-in READMEs (root + plugin) with cost transparency"
-      rework_count: 0
-      artefacts:
-        - git:3f7b566b65a67bd91f393d65b5e01f9f3e16e3cc
-    notes: >
-      Create the missing repo-root README.md (the on-ramp from Jack's writeup) AND rewrite
-      plugins/sprint-orchestrator/README.md outside-in (quickstart first, architecture demoted).
-      Both link to examples/hello-sprint/. Plugin README gets a cost-transparency block with
-      concrete $ ranges for Sonnet (typical dev/review) and Opus (rework escalation), plus the "your
-      own session model is unaffected" disclaimer.
-
-
-      Full developer context in
-      _bmad-output/implementation-artifacts/1-3-outside-in-readmes-with-cost-transparency.md.
-
-
-      Cost numbers START as placeholders — Jack will confirm/replace from actual sprint billing data
-      during the ship-gate smoketest.
-  - id: "4"
-    title: Clean-machine install path verified and documented
-    status: done
-    depends_on:
-      - "3"
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: grep -E "pnpm install|/plugin" README.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q examples/hello-sprint README.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -E "pnpm install|/plugin" plugins/sprint-orchestrator/README.md
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-1747268400-s4
-      claimed_at: 2026-05-14T01:41:26.803Z
-      completed_at: 2026-05-14T01:44:08.045Z
-      summary: Canonical install path documented in both repo-root README.md and
-        plugins/sprint-orchestrator/README.md, including prerequisites, clone, pnpm install, /plugin
-        install, and hello-sprint example reference.
-      rework_count: 0
-      artefacts:
-        - git:d0d97b34a750d2766475f6d8e4137db467778b02
-        - README.md
-        - plugins/sprint-orchestrator/README.md
-    notes: |
-      Author the canonical install commands in BOTH READMEs. Identical command sequence in repo-root and plugin READMEs. Includes prerequisite list (Node, pnpm, Claude Code), clone, install deps, build if needed, add marketplace + install via /plugin, run the example sprint.
-
-      Full developer context in _bmad-output/implementation-artifacts/1-4-clean-machine-install-path-verified-and-documented.md.
-
-      The dev agent CANNOT truly verify from a cold cache — its own runtime depends on the warm install. This story authors the documented path; cold-cache verification is the manual ship-gate smoketest in story 6.
-
-      Open question for Jack: is the repo URL public? The clone command needs that confirmation.
-  - id: "5"
-    title: First-run pr_per_story setup prompt
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: test -f plugins/sprint-orchestrator/packages/mcp-server/src/tools/pr-per-story-setup-phrases.ts
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q PR_PER_STORY_SETUP_PROMPT
-            plugins/sprint-orchestrator/packages/mcp-server/src/tools/pr-per-story-setup-phrases.ts
-          expect_exit: 0
-        - type: shell
-          cmd: test -f plugins/sprint-orchestrator/packages/mcp-server/src/tools/set-config-pr-per-story.ts
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q setConfigPrPerStory plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-          expect_exit: 0
-        - type: shell
-          cmd: grep -qE "PR_PER_STORY_SETUP_PROMPT|pr_per_story"
-            plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "getOrInitConfig surfaces pr_per_story setup
-            question when missing"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "reviewer pushes branch before pr create"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-    orchestrator:
-      claimed_by: dev-1747268400-s5
-      claimed_at: 2026-05-14T01:29:12.512Z
-      completed_at: 2026-05-14T01:35:12.146Z
-      summary: "Implemented first-run pr_per_story setup prompt: phrase-lock module, setConfigPrPerStory
-        MCP tool, getOrInitConfig surfacing the setup question, SKILL.md documentation, and e2e
-        mini-run with 3 fixtures all passing."
-      rework_count: 0
-      artefacts:
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/pr-per-story-setup-phrases.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/set-config-pr-per-story.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-        - git:5a8024eaf48b8dc328ce8ddd730dd006f074c57f
     notes: >
-      Make pr_per_story a deliberate choice at first-run, not a silent default inheriting Jack's
-      solo-dog-fooding posture. New phrase-lock module PR_PER_STORY_SETUP_PROMPT in
-      pr-per-story-setup-phrases.ts; widen getOrInitConfig's response so setupQuestions[] can carry
-      the prompt when pr_per_story is missing from an existing config; new MCP tool
-      setConfigPrPerStory to persist the user's answer; SKILL.md surfaces the phrase verbatim; new
-      e2e mini-run with 3 fixtures (no-config, existing-without-field, existing-with-field).
+      During the smoketest with pr_per_story enabled, the reviewer committed story work to a
+      per-story branch but never pushed it to origin. `gh pr create` either failed silently
+      or was never invoked. Result: zero PRs on GitHub despite both stories shipping locally.
 
 
-      Full developer context in
-      _bmad-output/implementation-artifacts/1-5-first-run-pr-per-story-setup-prompt.md.
+      Reviewer agent prompt must mandate the sequence:
+        1. confirm commits exist on the per-story branch
+        2. `git push -u origin <branch>`
+        3. `gh pr create ...`
+        4. then call recordStorySuccess
 
 
-      Reuses three established patterns — phrase-lock module + MCP tool registration + e2e mini-run
-      via in-memory MCP client. Do NOT reinvent; copy the resolveSpawnModel mini-run shape.
-  - id: "6"
-    title: Ship gate — pnpm e2e + pnpm verify green + manual install-from-clean smoketest
-    status: done
+      e2e test "reviewer pushes branch before pr create" must assert (via a fake git/gh
+      shim) that push happens before pr create, and that the reviewer surfaces a clear
+      failure if push fails (rather than calling recordStorySuccess on un-pushed work).
+
+
+      Out of scope: actually opening real PRs in the test — use a shim that records the
+      command order. Real-PR integration tested manually.
+
+  - id: "3"
+    title: pr_per_story prompt fires before first claim, not mid-sprint
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: grep -qE "pr_per_story.*before.*claimStory|setup.*before.*main loop" plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "pr_per_story setup fires before first claim"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    notes: >
+      Symptom from the smoketest: the pr_per_story setup prompt fires correctly on first
+      `getOrInitConfig`, but only inside the main loop. By the time the user answers "yes
+      per-story PRs," story 1 has already been claimed and committed on the invocation
+      branch — meaning `default_base` is now stale relative to story 1's branch, so
+      `prepareStoryBranch` for story 2 fails with the default_base-stale guard. Sprint stops
+      mid-flight.
+
+
+      Fix: the SKILL.md `process-backlog` setup section must explicitly run the pr_per_story
+      setup question and persistence step BEFORE the main loop's first `claimStory`. If the
+      user opts in mid-sprint, surface a clear "rerun from a clean branch" message rather
+      than partial-application.
+
+
+      e2e test "pr_per_story setup fires before first claim" must assert: when config is
+      missing pr_per_story, the orchestrator stops with the setup question before any story
+      is claimed.
+
+  - id: "4"
+    title: releaseClaimForStory MCP tool for fast recovery
+    status: ready
+    depends_on: []
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: test -f plugins/sprint-orchestrator/packages/mcp-server/src/tools/release-claim-for-story.ts
+          expect_exit: 0
+        - type: shell
+          cmd: grep -q releaseClaimForStory plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "releaseClaimForStory"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    notes: >
+      During the smoketest, when `prepareStoryBranch` for story 2 hit the default_base-stale
+      guard immediately after `claimStory`, story 2 was stuck in `in_progress` with a fresh
+      claim. `releaseStaleClaims` couldn't help (claim too recent), and the only recovery
+      was hand-editing sprint-status.yaml. Bad UX for a state the orchestrator created.
+
+
+      New tool `releaseClaimForStory(storyId, agentId)`:
+        - Resets the named story from `in_progress` back to `ready` IF the supplied agentId
+          matches the current claim holder (otherwise reject — protects against cross-agent
+          tampering).
+        - Idempotent: if the story isn't claimed, succeed silently.
+        - No time-based threshold — this is the immediate-recovery path.
+
+
+      e2e test "releaseClaimForStory" must cover: happy path (claim then release), agentId
+      mismatch rejection, and idempotency.
+
+
+      Document in SKILL.md as the recovery tool to call when prepareStoryBranch fails
+      immediately after claimStory.
+
+  - id: "5"
+    title: Ship gate — pnpm e2e + pnpm verify green
+    status: ready
     depends_on:
       - "1"
       - "2"
       - "3"
       - "4"
-      - "5"
     acceptance_criteria:
       checks:
         - type: shell
@@ -263,72 +167,12 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
-        - type: shell
-          cmd: test -f examples/hello-sprint/sprint-status.yaml && test -f examples/hello-sprint/README.md
-          expect_exit: 0
-        - type: shell
-          cmd: test -f README.md && test -f plugins/sprint-orchestrator/README.md
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-1747268400-s6
-      claimed_at: 2026-05-14T01:44:52.729Z
-      rework_count: 1
-      last_review_feedback: >-
-        AC1 (pnpm e2e) fails: 5 assertions fail, all because plugins/sprint-orchestrator/README.md
-        is missing a '## Running a sprint' section. Specific failures:
+    notes: >
+      Verification-only ship gate per planning-discipline Rule 3. All four follow-up
+      stories must integrate cleanly — green per-story review is necessary but not
+      sufficient.
 
 
-        1. 'run-sprint section exists' — the e2e test looks for a heading literally matching '##
-        Running a sprint' and does not find it.
-
-        2. 'raw /goal manual override is documented' — the section must contain the exact substring:
-        '/goal /sprint-orchestrator:process-backlog UNTIL every story in sprint-status.yaml is
-        status=done or status=failed, OR stop after'
-
-        3. Three additional 'running-a-sprint section exists' checks from the adopt,
-        last-line/clipboard, and adapt-bmad mini-runs all fail for the same root cause.
-
-
-        All other 96 assertions pass. ACs 2, 3, 4 pass.
-
-
-        Fix required: add a '## Running a sprint' section to plugins/sprint-orchestrator/README.md
-        that:
-
-        - Has a heading exactly '## Running a sprint'
-
-        - Documents /sprint-orchestrator:run-sprint as the recommended entrypoint (precedes /loop
-        mention)
-
-        - Includes the cap formula (e.g. 'turns = N stories × turn_cap_per_story')
-
-        - Contains the exact string: '/goal /sprint-orchestrator:process-backlog UNTIL every story
-        in sprint-status.yaml is status=done or status=failed, OR stop after'
-
-        - Mentions fresh-context rationale and /goal as the guaranteed-last-line
-
-        - Acknowledges clipboard auto-copy as deferred with a link to follow-ups.md
-
-        - Documents /sprint-orchestrator:adopt and the adaptor pattern, with one-way-coupling
-        statement, BMad-as-example framing, no-adaptors-ship disclaimer, and introduces adopt before
-        run-sprint in the section
-
-        - Documents adapt-bmad fast path and verification convention (adapt-bmad intro, verification
-        requirement, fenced shell example, names both adapt-bmad and universal adopt so the reader
-        sees the choice)
-
-        - Preserves all prior sprint content already in the file
-      last_review_at: 2026-05-14T01:47:14.189Z
-      completed_at: 2026-05-14T01:52:28.554Z
-      summary: "All ship-gate checks pass: 101/101 e2e assertions green, pnpm verify clean,
-        examples/hello-sprint files present, both READMEs present — including the '## Running a
-        sprint' section added on rework."
-      artefacts:
-        - git:4edde4ee2a05871f7ef03c0525620152150aa8a6
-        - plugins/sprint-orchestrator/README.md
-    notes: |
-      Verification-only ship gate per planning-discipline Rule 3. Mechanical gates (e2e + verify + presence of bundled example + presence of both READMEs) are checked above. The MANUAL gate — Jack clearing the plugin cache, following the README install path from cold, and running the example sprint to drain in under 10 minutes — is recorded out-of-band in the reviewer summary before recordStorySuccess.
-
-      If the manual smoketest fails, route rework to the offending story (1.4 for install issues, 1.3 for README issues, 1.2 for example issues), NOT to this story.
-
-      Full developer context in _bmad-output/implementation-artifacts/1-6-ship-gate-pnpm-e2e-pnpm-verify-green-and-manual-install-from-clean-smoketest.md.
+      No manual gate this time — the manual install-from-clean smoketest is what surfaced
+      these issues in the first place. Re-running it is a sensible bonus check but not part
+      of this sprint's mechanical gate.
