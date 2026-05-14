@@ -43,6 +43,7 @@ export async function recordStoryReopen(
 
     delete orchestrator.failed_at;
     delete orchestrator.last_failure_reason;
+    delete orchestrator.failure_details;
     delete orchestrator.claimed_by;
     delete orchestrator.claimed_at;
 
