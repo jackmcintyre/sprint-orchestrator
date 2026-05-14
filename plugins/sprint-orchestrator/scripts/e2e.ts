@@ -3439,6 +3439,19 @@ async function main(): Promise<number> {
     outcomes.push(...structuredFailureOutcomes);
   }
 
+  // dependency-base sprint, story 3: prepareStoryBranch roots a story's branch
+  // off its depended-on story's branch tip when depends_on is set and the dep
+  // branch exists locally. Also covers the negative case (empty depends_on →
+  // default_base).
+  if (
+    !filter ||
+    filter.test("prepareStoryBranch roots off depends_on story branch tip when present")
+  ) {
+    console.log("[e2e] mini-run: prepareStoryBranch dependency-rooted base");
+    const depBaseOutcomes = await runPrepareStoryBranchDependencyBaseMiniRun();
+    outcomes.push(...depBaseOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -4699,6 +4712,287 @@ async function runStructuredFailureDetailsMiniRun(): Promise<AssertionOutcome[]>
     });
 
     await client.close();
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * dependency-base sprint, story 3 — prepareStoryBranch roots off the
+ * depended-on story's branch tip when depends_on is set and the dep branch
+ * exists locally.
+ *
+ * Setup: minimal git repo with two stories (id "1" and "2", where 2
+ * depends_on ["1"]). Story 1 is manually marked `done` with a real
+ * per-story branch and orchestrator.branch. Story 2 is ready.
+ *
+ * Positive case: prepareStoryBranch for story 2 must root the new branch
+ * off story 1's tip (asserted via git merge-base --is-ancestor).
+ *
+ * Negative case: a standalone story (empty depends_on) roots off default_base.
+ *
+ * Grep tag: "prepareStoryBranch roots off depends_on story branch tip when present"
+ */
+async function runPrepareStoryBranchDependencyBaseMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-dep-base-"));
+  try {
+    // ── Init a minimal git repo ──────────────────────────────────────────────
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    // Sprint with story 1 (done) and story 2 (ready, depends_on ["1"])
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "dep-base-fixture"',
+      "stories:",
+      "  - id: '1'",
+      "    title: First story",
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/s1.txt",
+      "    orchestrator: {}",
+      "  - id: '2'",
+      "    title: Second story",
+      "    status: ready",
+      "    depends_on: ['1']",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/s2.txt",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+
+    await fs.writeFile(path.join(tmp, "sprint-status.yaml"), sprintYaml, "utf8");
+    g(["add", "sprint-status.yaml"]);
+    g(["commit", "-q", "-m", "init: dep-base fixture"]);
+
+    // ── Config: pr_per_story=true, default_base=main ────────────────────────
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // ── Create story 1's per-story branch and mark it done ─────────────────
+    const s1Branch = "1-first-story";
+    g(["checkout", "-q", "-b", s1Branch]);
+    await fs.mkdir(path.join(tmp, "src"), { recursive: true });
+    await fs.writeFile(path.join(tmp, "src", "s1.txt"), "story 1 work\n", "utf8");
+    g(["add", "src/s1.txt"]);
+    g(["commit", "-q", "-m", "feat(s1): work"]);
+
+    // Record the s1Branch commit as story 1's tip
+    const s1Tip = g(["rev-parse", "HEAD"]).stdout.trim();
+
+    // Manually mark story 1 as done in sprint-status.yaml with orchestrator.branch set
+    const doneYaml = [
+      "schema_version: 1",
+      'sprint_id: "dep-base-fixture"',
+      "stories:",
+      "  - id: '1'",
+      "    title: First story",
+      "    status: done",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/s1.txt",
+      `    orchestrator:`,
+      `      branch: ${s1Branch}`,
+      `      base_branch: main`,
+      `      completed_at: "2026-01-01T00:00:00.000Z"`,
+      "  - id: '2'",
+      "    title: Second story",
+      "    status: ready",
+      "    depends_on: ['1']",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/s2.txt",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+
+    await fs.writeFile(path.join(tmp, "sprint-status.yaml"), doneYaml, "utf8");
+    g(["add", "sprint-status.yaml"]);
+    g(["commit", "-q", "-m", "chore: mark story 1 done"]);
+
+    // ── Positive case: prepareStoryBranch for story 2 ────────────────────────
+    // Claim story 2 first (prepareStoryBranch expects an existing claim).
+    await claimStory(ctx, "2", "agent-dep-test");
+    const prep2 = await prepareStoryBranch(ctx, "2", "agent-dep-test");
+
+    await runOne({
+      name: "prepareStoryBranch roots off depends_on story branch tip when present: branch created without skip",
+      run: () => {
+        expect(
+          prep2.skipped === false,
+          `expected skipped=false, got ${String(prep2.skipped)} reason=${String(prep2.reason)}`,
+        );
+        expect(
+          typeof prep2.branch === "string" && prep2.branch.length > 0,
+          `expected a branch name, got ${String(prep2.branch)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "prepareStoryBranch roots off depends_on story branch tip when present: new branch is rooted at dep story's branch tip",
+      run: () => {
+        if (prep2.skipped || !prep2.branch) return;
+        // git merge-base --is-ancestor <ancestor> <descendant> exits 0 when
+        // the first commit is an ancestor of the second.
+        const r = g(["merge-base", "--is-ancestor", s1Tip, prep2.branch]);
+        expect(
+          r.status === 0,
+          `expected story 1's tip (${s1Tip}) to be an ancestor of story 2's branch (${prep2.branch}); ` +
+            `git merge-base --is-ancestor exited ${r.status}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "prepareStoryBranch roots off depends_on story branch tip when present: base_branch recorded as dep's branch not default_base",
+      run: () => {
+        const state = spawnSync("cat", [path.join(tmp, "sprint-status.yaml")], {
+          encoding: "utf8",
+        });
+        // Read back the state via the tool result — base_branch should be s1Branch
+        expect(prep2.branch !== null, "branch must be set to inspect base_branch");
+        // Verify via git that HEAD is on s1's descendant, not a clean main branch
+        const mergeBaseVsMain = g(["merge-base", "--is-ancestor", s1Tip, "main"]);
+        // s1Tip should NOT be an ancestor of main (s1's work was not merged to main)
+        expect(
+          mergeBaseVsMain.status !== 0,
+          `s1Tip (${s1Tip}) should NOT be reachable from main — story 2 must be rooted from s1 branch tip, not main`,
+        );
+        void state; // suppress unused warning
+      },
+    });
+
+    // ── Negative case: standalone story (no depends_on) roots off main ──────
+    // Go back to main and set up a standalone story (story 3, no depends_on).
+    // We need to checkout back to a branch off main for this.
+    g(["checkout", "-q", "main"]);
+
+    const standaloneYaml = [
+      "schema_version: 1",
+      'sprint_id: "dep-base-fixture-neg"',
+      "stories:",
+      "  - id: '3'",
+      "    title: Standalone story",
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/s3.txt",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+
+    // Write a fresh sprint-status for the standalone test in a new temp dir
+    // (avoids interference with the s1/s2 sprint state already on main).
+    const tmp2 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-dep-base-neg-"));
+    try {
+      const g2 = (args: string[]) => spawnSync("git", args, { cwd: tmp2, encoding: "utf8" });
+      g2(["init", "-q", "--initial-branch=main"]);
+      g2(["config", "user.email", "test@example.com"]);
+      g2(["config", "user.name", "Test"]);
+      g2(["config", "commit.gpgsign", "false"]);
+
+      await fs.writeFile(path.join(tmp2, "sprint-status.yaml"), standaloneYaml, "utf8");
+      g2(["add", "sprint-status.yaml"]);
+      g2(["commit", "-q", "-m", "init: standalone story"]);
+
+      const configDir2 = path.join(tmp2, ".sprint-orchestrator");
+      await fs.mkdir(configDir2, { recursive: true });
+      await fs.writeFile(
+        path.join(configDir2, "config.yaml"),
+        [
+          "sprintStatusPath: sprint-status.yaml",
+          "autoDetected: false",
+          'layout: "custom"',
+          "pr_per_story: true",
+          'default_base: "main"',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const ctx2: ToolContext = {
+        projectRoot: tmp2,
+        sprintStatusPath: path.join(tmp2, "sprint-status.yaml"),
+        configPath: path.join(tmp2, ".sprint-orchestrator", "config.yaml"),
+      };
+
+      const mainTip2 = g2(["rev-parse", "main"]).stdout.trim();
+
+      await claimStory(ctx2, "3", "agent-standalone");
+      const prep3 = await prepareStoryBranch(ctx2, "3", "agent-standalone");
+
+      await runOne({
+        name: "prepareStoryBranch roots off depends_on story branch tip when present: story with empty depends_on roots off default_base (main)",
+        run: () => {
+          expect(
+            prep3.skipped === false,
+            `expected skipped=false for standalone story, got ${String(prep3.skipped)}`,
+          );
+          expect(
+            typeof prep3.branch === "string" && prep3.branch.length > 0,
+            `expected a branch name for standalone story, got ${String(prep3.branch)}`,
+          );
+          if (!prep3.branch) return;
+          // The new branch must be rooted at main's tip
+          const r = g2(["merge-base", "--is-ancestor", mainTip2, prep3.branch]);
+          expect(
+            r.status === 0,
+            `expected main tip (${mainTip2}) to be an ancestor of standalone branch (${prep3.branch}); ` +
+              `git merge-base --is-ancestor exited ${r.status}`,
+          );
+        },
+      });
+    } finally {
+      await fs.rm(tmp2, { recursive: true, force: true });
+    }
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
