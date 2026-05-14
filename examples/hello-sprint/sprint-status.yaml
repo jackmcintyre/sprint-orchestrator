@@ -3,7 +3,7 @@ schema_version: 1
 stories:
   - id: "1"
     title: Create the HELLO file
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -12,22 +12,36 @@ stories:
         - type: shell
           cmd: grep -q "hello from sprint-orchestrator" HELLO.md
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      claimed_by: dev-1747268000
+      claimed_at: 2026-05-14T02:06:26.144Z
+      rework_count: 0
+      base_branch: main
+      branch: 1-create-the-hello-file
+      branch_prepared_by: dev-1747268000
+      branch_prepared_at: 2026-05-14T02:06:30.836Z
+      completed_at: 2026-05-14T02:08:53.493Z
+      summary: HELLO.md created at examples/hello-sprint/HELLO.md containing the required "hello from
+        sprint-orchestrator" line.
+      artefacts:
+        - git:17fe4af21dd5d4a68fe0d2155cd6d998cee16ad6
+        - examples/hello-sprint/HELLO.md
     notes: >
-      Create a file at HELLO.md (inside this directory, examples/hello-sprint/)
-      containing exactly the line:
-      hello from sprint-orchestrator
+      Create a file at HELLO.md (inside this directory, examples/hello-sprint/) containing exactly
+      the line: hello from sprint-orchestrator
   - id: "2"
     title: Ship gate — HELLO file is present
     status: ready
-    depends_on: ["1"]
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: shell
           cmd: test -f HELLO.md && grep -q "hello from sprint-orchestrator" HELLO.md
           expect_exit: 0
-    orchestrator: {}
+    orchestrator:
+      rework_count: 0
     notes: >
-      Verification-only ship gate per planning-discipline Rule 3 — every sprint
-      ends with a ship gate. This story requires no code change; its job is to
-      prove the prior story landed correctly.
+      Verification-only ship gate per planning-discipline Rule 3 — every sprint ends with a ship
+      gate. This story requires no code change; its job is to prove the prior story landed
+      correctly.
