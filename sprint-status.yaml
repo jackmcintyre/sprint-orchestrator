@@ -99,7 +99,7 @@ stories:
       with no pnpm install step.
   - id: "3"
     title: Outside-in READMEs (root + plugin) with cost transparency
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
       - "2"
@@ -131,6 +131,8 @@ stories:
           expect_exit: 0
     orchestrator:
       rework_count: 0
+      claimed_by: dev-1747268400-s3
+      claimed_at: 2026-05-14T01:35:24.090Z
     notes: >
       Create the missing repo-root README.md (the on-ramp from Jack's writeup) AND rewrite
       plugins/sprint-orchestrator/README.md outside-in (quickstart first, architecture demoted).
@@ -204,11 +206,11 @@ stories:
     orchestrator:
       claimed_by: dev-1747268400-s5
       claimed_at: 2026-05-14T01:29:12.512Z
-      rework_count: 0
       completed_at: 2026-05-14T01:35:12.146Z
       summary: "Implemented first-run pr_per_story setup prompt: phrase-lock module, setConfigPrPerStory
         MCP tool, getOrInitConfig surfacing the setup question, SKILL.md documentation, and e2e
         mini-run with 3 fixtures all passing."
+      rework_count: 0
       artefacts:
         - plugins/sprint-orchestrator/packages/mcp-server/src/tools/pr-per-story-setup-phrases.ts
         - plugins/sprint-orchestrator/packages/mcp-server/src/tools/set-config-pr-per-story.ts
