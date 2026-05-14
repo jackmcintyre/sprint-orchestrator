@@ -15,13 +15,14 @@ You are a thin entrypoint. You do not orchestrate stories yourself — `/sprint-
 2. Check that `CWD/sprint-status.yaml` exists. If it does NOT:
    - Refuse with exactly: `no backlog found: expected sprint-status.yaml at <CWD>/sprint-status.yaml. Copy a backlog file there before running.`
    - Do NOT invoke `/goal`. Stop.
-3. Read `CWD/sprint-status.yaml`. Count `stories[]` as `N`.
-4. If `N > 0` and every story has `status: done` or `status: failed`, refuse with exactly: `nothing to run — backlog is drained. Stories: <D> done, <F> failed.` Do NOT invoke `/goal`. Stop.
-5. Read `turn_cap_per_story` from `CWD/.sprint-orchestrator/config.yaml`. If the file or field is missing, use the default `3`. (Default matches the per-story worst case under the current rework cap of 2: dev + reviewer + one rework dev + reviewer, rounded up.)
-6. Compute `turn_cap = ceil(N * turn_cap_per_story)`.
-7. Print any short narrative / summary lines you want the user to see (e.g. "3 stories detected, turn cap = 9"). Keep it brief — one or two lines at most.
-8. Print a single blank line as a visual separator.
-9. Print the locked final block — exactly two lines, in this order, with nothing after them:
+3. Uncommitted-backlog preflight: if `CWD` is inside a git repo, run `git status --porcelain -- sprint-status.yaml`. If the output is non-empty (file is untracked, modified, or staged-but-not-committed), refuse with the phrase-locked `UNCOMMITTED_BACKLOG_REFUSAL` message from `packages/mcp-server/src/tools/run-sprint-preflight-phrases.ts`. Do NOT invoke `/goal`. Stop. Why this matters: a story PR merging to main mid-run will otherwise overwrite the live backlog, requiring manual recovery from a dangling git blob. If `CWD` is not inside a git repo (or `git` is unavailable), skip the preflight and continue. The reference implementation `planRunSprint` performs this check via `checkUncommittedBacklog(cwd)`.
+4. Read `CWD/sprint-status.yaml`. Count `stories[]` as `N`.
+5. If `N > 0` and every story has `status: done` or `status: failed`, refuse with exactly: `nothing to run — backlog is drained. Stories: <D> done, <F> failed.` Do NOT invoke `/goal`. Stop.
+6. Read `turn_cap_per_story` from `CWD/.sprint-orchestrator/config.yaml`. If the file or field is missing, use the default `3`. (Default matches the per-story worst case under the current rework cap of 2: dev + reviewer + one rework dev + reviewer, rounded up.)
+7. Compute `turn_cap = ceil(N * turn_cap_per_story)`.
+8. Print any short narrative / summary lines you want the user to see (e.g. "3 stories detected, turn cap = 9"). Keep it brief — one or two lines at most.
+9. Print a single blank line as a visual separator.
+10. Print the locked final block — exactly two lines, in this order, with nothing after them:
 
    ```
    Paste this in a fresh context window for the cleanest run:
@@ -39,7 +40,7 @@ You are a thin entrypoint. You do not orchestrate stories yourself — `/sprint-
 
 ## Implementation note
 
-A reference implementation of steps 2–6 lives in `packages/mcp-server/src/tools/plan-run-sprint.ts` (`planRunSprint`). The locked final-block strings (fresh-context guidance + `/goal` line) are defined in `packages/mcp-server/src/tools/run-sprint-output-format.ts` — `FRESH_CONTEXT_GUIDANCE_LINE`, `formatGoalCommandLine(turnCap)`, and `buildRunSprintFinalOutput(turnCap)`. The e2e harness asserts on those constants directly, so the wrapper's emitted output and the documented contract are the same string by construction. If you (the LLM running this skill) need the final block deterministically, call `buildRunSprintFinalOutput(turn_cap)` and print its return value as-is at the end of stdout.
+A reference implementation of steps 2–7 lives in `packages/mcp-server/src/tools/plan-run-sprint.ts` (`planRunSprint`). The locked final-block strings (fresh-context guidance + `/goal` line) are defined in `packages/mcp-server/src/tools/run-sprint-output-format.ts` — `FRESH_CONTEXT_GUIDANCE_LINE`, `formatGoalCommandLine(turnCap)`, and `buildRunSprintFinalOutput(turnCap)`. The e2e harness asserts on those constants directly, so the wrapper's emitted output and the documented contract are the same string by construction. If you (the LLM running this skill) need the final block deterministically, call `buildRunSprintFinalOutput(turn_cap)` and print its return value as-is at the end of stdout.
 
 ## Rules
 

@@ -35,6 +35,7 @@ import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { validateAndWriteBacklog } from "../packages/mcp-server/src/tools/adopt-write.js";
 import { adaptBmadOutput } from "../packages/mcp-server/src/tools/adapt-bmad.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
+import { UNCOMMITTED_BACKLOG_REFUSAL } from "../packages/mcp-server/src/tools/run-sprint-preflight-phrases.js";
 import {
   CLIPBOARD_AUTOCOPY_NOTE_LINE,
   CLIPBOARD_OPT_OUT_ENV_VAR,
@@ -2002,6 +2003,186 @@ async function runRunSprintWrapperMiniRun(): Promise<AssertionOutcome[]> {
 }
 
 /**
+ * Mini-run for orchestrator-hardening-followup story 3: run-sprint
+ * refuses to launch when sprint-status.yaml has uncommitted changes in
+ * the current git repo. Sets up a temp git repo, writes a sprint-status
+ * file WITHOUT committing, calls the planner, and asserts the
+ * phrase-locked refusal fires.
+ *
+ * Also covers the negative path: once the file is committed, the same
+ * planner call proceeds normally and returns `kind: "ok"`.
+ *
+ * The phrase-locked refusal text is asserted verbatim against
+ * `UNCOMMITTED_BACKLOG_REFUSAL` so the planner, skill, and harness can
+ * never drift.
+ */
+async function runRunSprintUncommittedBacklogMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function writeSprint(root: string) {
+    const sprintYaml = [
+      "schema_version: 1",
+      'sprint_id: "uncommitted-backlog-fixture"',
+      "stories:",
+      '  - id: "S1"',
+      '    title: "story S1"',
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: file_exists",
+      "          path: src/S1.txt",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(root, "sprint-status.yaml"), sprintYaml, "utf8");
+  }
+
+  // Variant 1: sprint-status.yaml exists but is UNTRACKED in a git repo.
+  // The preflight must refuse with the phrase-locked message.
+  const tmp1 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-uncommitted-1-"));
+  try {
+    const gitInit = git(tmp1, ["init", "-q", "-b", "main"]);
+    expect(gitInit.status === 0, `git init failed: ${gitInit.stderr}`);
+    git(tmp1, ["config", "user.email", "e2e@example.com"]);
+    git(tmp1, ["config", "user.name", "E2E Harness"]);
+    git(tmp1, ["config", "commit.gpgsign", "false"]);
+    // First commit so we have a HEAD, but do NOT commit sprint-status.yaml.
+    await fs.writeFile(path.join(tmp1, "README.md"), "fixture\n", "utf8");
+    git(tmp1, ["add", "README.md"]);
+    const firstCommit = git(tmp1, ["commit", "-q", "-m", "initial"]);
+    expect(firstCommit.status === 0, `initial commit failed: ${firstCommit.stderr}`);
+
+    await writeSprint(tmp1);
+
+    const result = await planRunSprint({ cwd: tmp1 });
+
+    const a: Assertion = {
+      name: "run-sprint refuses when sprint-status.yaml has uncommitted changes",
+      run: () => {
+        expect(result.kind === "refuse", `expected kind=refuse, got ${JSON.stringify(result)}`);
+        if (result.kind !== "refuse") return;
+        expect(
+          result.reason === "uncommitted_backlog",
+          `expected reason=uncommitted_backlog, got ${result.reason}`,
+        );
+        expect(
+          result.message === UNCOMMITTED_BACKLOG_REFUSAL,
+          `expected phrase-locked UNCOMMITTED_BACKLOG_REFUSAL, got: ${result.message}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp1, { recursive: true, force: true });
+  }
+
+  // Variant 2: sprint-status.yaml exists and is MODIFIED after being
+  // committed. The preflight must still refuse.
+  const tmp2 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-uncommitted-2-"));
+  try {
+    const gitInit = git(tmp2, ["init", "-q", "-b", "main"]);
+    expect(gitInit.status === 0, `git init failed: ${gitInit.stderr}`);
+    git(tmp2, ["config", "user.email", "e2e@example.com"]);
+    git(tmp2, ["config", "user.name", "E2E Harness"]);
+    git(tmp2, ["config", "commit.gpgsign", "false"]);
+
+    await writeSprint(tmp2);
+    git(tmp2, ["add", "sprint-status.yaml"]);
+    const commitClean = git(tmp2, ["commit", "-q", "-m", "commit clean backlog"]);
+    expect(commitClean.status === 0, `clean commit failed: ${commitClean.stderr}`);
+
+    // Modify after commit — now dirty.
+    await fs.appendFile(
+      path.join(tmp2, "sprint-status.yaml"),
+      "# trailing comment added post-commit\n",
+      "utf8",
+    );
+
+    const result = await planRunSprint({ cwd: tmp2 });
+
+    const a: Assertion = {
+      name: "run-sprint refuses when committed sprint-status.yaml has unstaged modifications",
+      run: () => {
+        expect(result.kind === "refuse", `expected kind=refuse, got ${JSON.stringify(result)}`);
+        if (result.kind !== "refuse") return;
+        expect(
+          result.reason === "uncommitted_backlog",
+          `expected reason=uncommitted_backlog, got ${result.reason}`,
+        );
+        expect(
+          result.message === UNCOMMITTED_BACKLOG_REFUSAL,
+          `expected phrase-locked UNCOMMITTED_BACKLOG_REFUSAL, got: ${result.message}`,
+        );
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp2, { recursive: true, force: true });
+  }
+
+  // Variant 3: sprint-status.yaml exists and is fully committed. The
+  // preflight passes and the planner returns kind=ok with the computed
+  // /goal command.
+  const tmp3 = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-uncommitted-3-"));
+  try {
+    const gitInit = git(tmp3, ["init", "-q", "-b", "main"]);
+    expect(gitInit.status === 0, `git init failed: ${gitInit.stderr}`);
+    git(tmp3, ["config", "user.email", "e2e@example.com"]);
+    git(tmp3, ["config", "user.name", "E2E Harness"]);
+    git(tmp3, ["config", "commit.gpgsign", "false"]);
+
+    await writeSprint(tmp3);
+    git(tmp3, ["add", "sprint-status.yaml"]);
+    const commitClean = git(tmp3, ["commit", "-q", "-m", "commit clean backlog"]);
+    expect(commitClean.status === 0, `clean commit failed: ${commitClean.stderr}`);
+
+    const result = await planRunSprint({ cwd: tmp3 });
+
+    const a: Assertion = {
+      name: "run-sprint preflight passes when sprint-status.yaml is fully committed",
+      run: () => {
+        expect(result.kind === "ok", `expected kind=ok, got ${JSON.stringify(result)}`);
+        if (result.kind !== "ok") return;
+        expect(result.storyCount === 1, `expected storyCount=1, got ${result.storyCount}`);
+      },
+    };
+
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(tmp3, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
  * Mini-run for the goal-adoption sprint story 1: run-sprint emits the
  * `/goal` command on a guaranteed single, last line of stdout, preceded
  * by a one-line fresh-context-window guidance note. The format is locked
@@ -3477,6 +3658,23 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: run-sprint wrapper turn cap + refusal paths");
     const runSprintOutcomes = await runRunSprintWrapperMiniRun();
     outcomes.push(...runSprintOutcomes);
+  }
+
+  // orchestrator-hardening-followup sprint, story 3: run-sprint refuses
+  // to launch when sprint-status.yaml has uncommitted changes. Guards
+  // the 2026-05-14 retro lesson where PR #29 merging to main overwrote
+  // an uncommitted live backlog.
+  if (
+    !filter ||
+    filter.test("run-sprint refuses when sprint-status.yaml has uncommitted changes") ||
+    filter.test(
+      "run-sprint refuses when committed sprint-status.yaml has unstaged modifications",
+    ) ||
+    filter.test("run-sprint preflight passes when sprint-status.yaml is fully committed")
+  ) {
+    console.log("[e2e] mini-run: run-sprint uncommitted-backlog preflight refusal");
+    const uncommittedOutcomes = await runRunSprintUncommittedBacklogMiniRun();
+    outcomes.push(...uncommittedOutcomes);
   }
 
   // goal-adoption sprint, story 1: run-sprint locks the /goal command as the
