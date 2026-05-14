@@ -282,7 +282,7 @@ stories:
       _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
   - id: "4"
     title: Ship gate — pnpm e2e + pnpm verify green + manual pr_per_story=true smoketest
-    status: ready
+    status: failed
     depends_on:
       - "1"
       - "2"
@@ -296,13 +296,19 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-ade78844-s4d
+      claimed_at: 2026-05-14T10:21:01.101Z
       rework_count: 0
       base_branch: main
       base_branch_fallback_reason: dep 3 status=ready (not done)
+      dev_returned_at: 2026-05-14T10:13:16.999Z
       branch: 4-ship-gate-pnpm-e2e-pnpm-verify-green-man
       branch_prepared_by: dev-ade78844-s4b
       branch_prepared_at: 2026-05-14T10:12:39.775Z
-      dev_returned_at: 2026-05-14T10:13:16.999Z
+      last_failure_reason: "Branch-graph divergence mid-run: story 4 cut from main instead of story-3 tip,
+        leaving story 3's done-state absent. ACs themselves pass locally (e2e 128/128, verify 127
+        tests). Bookkeeping recovery deferred — reopen from clean main with reconciled branch base."
+      failed_at: 2026-05-14T10:21:23.048Z
     notes: >
       Verification-only ship gate per planning-discipline Rule 3. Mechanical gates checked above.
 
