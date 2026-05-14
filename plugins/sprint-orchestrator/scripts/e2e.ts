@@ -3399,6 +3399,16 @@ async function main(): Promise<number> {
     outcomes.push(...pushBeforePROutcomes);
   }
 
+  // smoketest-followups sprint, story 3: pr_per_story setup fires before first
+  // claim. Phrase-locks SKILL.md to assert the setup ordering constraint is
+  // documented, and verifies getOrInitConfig surfaces the setup question before
+  // any claimStory would be called.
+  if (!filter || filter.test("pr_per_story setup fires before first claim")) {
+    console.log("[e2e] mini-run: pr_per_story setup fires before first claim");
+    const prPerStoryBeforeClaimOutcomes = await runPrPerStorySetupBeforeFirstClaimMiniRun();
+    outcomes.push(...prPerStoryBeforeClaimOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -4155,6 +4165,153 @@ async function runReviewerPushesBeforePRCreateMiniRun(): Promise<AssertionOutcom
       );
     },
   });
+
+  return outcomes;
+}
+
+/**
+ * smoketest-followups sprint, story 3 — pr_per_story setup fires before first claim.
+ *
+ * Two assertions:
+ *
+ *   1. Phrase-lock: SKILL.md contains a phrase that documents the ordering
+ *      constraint — the pr_per_story setup question must be resolved before
+ *      `claimStory` is called. The grep pattern is:
+ *        /pr_per_story.*before.*claimStory|setup.*before.*main loop/
+ *
+ *   2. Behavioral pre-condition: when config exists but `pr_per_story` is
+ *      absent, `getOrInitConfig` returns the PR_PER_STORY_SETUP_PROMPT in
+ *      `setupQuestions`. This confirms the server surfaces the question that
+ *      the SKILL.md ordering constraint is designed to intercept — if the
+ *      server never surfaces the question, the constraint has no effect.
+ *
+ * Grep tag: "pr_per_story setup fires before first claim".
+ */
+async function runPrPerStorySetupBeforeFirstClaimMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  // ── 1. Phrase-lock: SKILL.md must document that pr_per_story setup runs
+  //       before claimStory / before the main loop. ─────────────────────────
+  const skillPath = path.resolve(HERE, "..", "skills", "process-backlog", "SKILL.md");
+  let skillText = "";
+  try {
+    skillText = await fs.readFile(skillPath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "pr_per_story setup fires before first claim: SKILL.md is readable",
+      passed: false,
+      error: `could not read SKILL.md at ${skillPath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  await runOne({
+    name: "pr_per_story setup fires before first claim: SKILL.md documents setup ordering before claimStory",
+    run: () => {
+      const pattern = /pr_per_story.*before.*claimStory|setup.*before.*main loop/;
+      expect(
+        pattern.test(skillText),
+        `SKILL.md does not contain a phrase matching /pr_per_story.*before.*claimStory|setup.*before.*main loop/. ` +
+          `The setup section must explicitly state that pr_per_story setup resolves before the first claimStory call.`,
+      );
+    },
+  });
+
+  // ── 2. Behavioral: getOrInitConfig must surface setup question when
+  //       pr_per_story is absent — confirming the server-side precondition
+  //       that makes the SKILL.md ordering constraint meaningful. ────────────
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-pr-per-story-before-claim-"));
+  try {
+    // Minimal sprint-status.yaml so the server initialises without error.
+    await fs.writeFile(
+      path.join(tmp, "sprint-status.yaml"),
+      [
+        "sprint_id: pr-per-story-before-claim-fixture",
+        "schema_version: 1",
+        "stories:",
+        "  - id: '1'",
+        "    title: fixture story",
+        "    status: ready",
+        "    depends_on: []",
+        "    acceptance_criteria:",
+        "      checks: []",
+        "    orchestrator: {}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // Config exists but pr_per_story field is intentionally absent.
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      ["sprintStatusPath: sprint-status.yaml", "layout: custom", "autoDetected: false", ""].join(
+        "\n",
+      ),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+      configPath: path.join(configDir, "config.yaml"),
+    };
+    const server = buildServer(ctx);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client(
+      { name: "e2e-pr-per-story-before-claim", version: "0.0.1" },
+      { capabilities: {} },
+    );
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    let parsed: { setupQuestions?: unknown[]; needsSetup?: unknown } = {};
+    try {
+      const result = (await client.callTool({
+        name: "getOrInitConfig",
+        arguments: {},
+      })) as { content?: Array<{ type: string; text?: string }> };
+      const textPart = result.content?.find((c) => c.type === "text");
+      if (textPart?.text) {
+        parsed = JSON.parse(textPart.text) as {
+          setupQuestions?: unknown[];
+          needsSetup?: unknown;
+        };
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+
+    const questions: unknown[] = Array.isArray(parsed.setupQuestions) ? parsed.setupQuestions : [];
+    const hasPrompt = questions.some((q) => q === PR_PER_STORY_SETUP_PROMPT);
+
+    await runOne({
+      name: "pr_per_story setup fires before first claim: getOrInitConfig surfaces setup question when pr_per_story absent",
+      run: () => {
+        expect(
+          hasPrompt,
+          `expected PR_PER_STORY_SETUP_PROMPT in setupQuestions when pr_per_story is absent from config, ` +
+            `got ${JSON.stringify(questions)}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
 
   return outcomes;
 }
