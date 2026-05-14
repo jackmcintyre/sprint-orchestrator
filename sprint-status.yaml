@@ -1,162 +1,123 @@
-sprint_id: smoketest-followups
+sprint_id: orchestrator-hardening
 stories:
   - id: "1"
-    title: Reviewer scope guardrail — only touch the assigned story
-    status: failed
+    title: ACs only evaluate after the dev subagent returns
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: grep -q "ONLY operate on the storyId" plugins/sprint-orchestrator/agents/reviewer.md
+          cmd: grep -q dev_returned_at plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
           expect_exit: 0
         - type: shell
-          cmd: grep -qE 'storyId.*mismatch|wrong.story'
-            plugins/sprint-orchestrator/packages/mcp-server/src/tools/record-story-success.ts
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "reviewer scope guardrail"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "orchestrator refuses to evaluate ACs before
+            dev has produced work"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-run-1
-      claimed_at: 2026-05-14T02:24:30.785Z
-      last_failure_reason: "Acceptance criteria failed: shell, shell, shell"
+      claimed_by: dev-2026-05-14-s1
+      claimed_at: 2026-05-14T03:17:50.371Z
       rework_count: 0
-      failed_at: 2026-05-14T02:25:00.377Z
+      base_branch: main
+      branch: 1-acs-only-evaluate-after-the-dev-subagent
+      branch_prepared_by: dev-2026-05-14-s1
+      branch_prepared_at: 2026-05-14T03:17:53.448Z
+      completed_at: 2026-05-14T03:25:55.100Z
+      summary: Added dev_returned_at guard to schema and state machine so recordStoryFailure and
+        validateAcceptanceCriteria refuse until the dev subagent marks its return via the new
+        markDevReturned tool; all 3 ACs pass.
+      artefacts:
+        - git:e4c96bb6faf87d61b42c27c11529c966740ede1f
+        - plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
     notes: >
-      During the mvp-polish smoketest, the reviewer subagent spawned for story 1 silently processed
-      story 2 as well — both stories ended up done with a single explicit dev/reviewer pair. That
-      breaks the audit trail and the one-story-at-a-time concurrency guarantee.
+      Fix the spurious-failure bug: a story can be marked failed within 30s of claimStory, before
+      any dev work has happened, because ACs evaluate on the post-claim state and of course fail.
 
 
-      Two layers of defence required:
-        1. Reviewer agent prompt (`plugins/sprint-orchestrator/agents/reviewer.md`) must
-           explicitly say "ONLY operate on the storyId you were given. Never call
-           recordStorySuccess / recordStoryRework / recordStoryFailure for any other story."
-        2. The recordStory* MCP tools should sanity-check that the story being recorded
-           matches the agentId's claim — surface a structured rejection if a reviewer is
-           trying to record success for a story it didn't claim.
+      Two coordinated fixes:
+
+        1. Audit process-backlog/SKILL.md step ordering — confirm validateAcceptanceCriteria is only
+           called by the reviewer AFTER the dev subagent returns. If any path invokes ACs at claim
+           time, remove it.
+
+        2. State-machine backstop: persist orchestrator.dev_returned_at (ISO timestamp) when the dev
+           subagent finishes its swing. recordStoryFailure AND validateAcceptanceCriteria refuse when
+           dev_returned_at is unset, with structured reason "ac_evaluation_before_dev_returned".
 
 
-      New e2e test "reviewer scope guardrail" must assert: a reviewer that tries to record success
-      for a non-claimed story is rejected by the MCP layer with a clear error.
+      OPEN QUESTION FOR THE DEV TO RESOLVE FIRST:
+        Does the orchestrator already persist anything when the dev finishes? If yes, reuse as the
+        marker. If no, identify the right write point — most likely a new tiny MCP tool the dev
+        calls before returning (e.g. markDevReturned({ storyId, agentId })), OR a process-backlog
+        skill action between dev spawn return and reviewer spawn. The dev should pick one and
+        surface the choice in the implementation summary.
+
+
+      AC VERIFICATION (planning-discipline Rule 1):
+        New mini-run runDevReturnedGuardMiniRun behind grep tag
+        "orchestrator refuses to evaluate ACs before dev has produced work". Sets up a temp dir
+        with a real sprint-status.yaml, claims a story (real MCP tool), then tries to call
+        recordStoryFailure / validateAcceptanceCriteria WITHOUT setting dev_returned_at. Asserts
+        the refusal fires with the structured reason.
   - id: "2"
-    title: Reviewer must push branch before opening PR
-    status: done
-    depends_on: []
+    title: Structured failure details replace opaque "shell, shell, shell" reasons
+    status: ready
+    depends_on:
+      - "1"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: grep -qE "git push.*-u origin|git push.*--set-upstream"
-            plugins/sprint-orchestrator/agents/reviewer.md
+          cmd: grep -q failure_details plugins/sprint-orchestrator/packages/mcp-server/src/state/schema.ts
           expect_exit: 0
         - type: shell
-          cmd: grep -q "before calling gh pr create" plugins/sprint-orchestrator/agents/reviewer.md
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "reviewer pushes branch before pr create"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "recordStoryFailure persists structured
+            details, not just check types"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-run-2
-      claimed_at: 2026-05-14T02:25:53.690Z
-      completed_at: 2026-05-14T02:31:48.181Z
-      summary: Reviewer agent prompt updated to mandate git push before gh pr create, with a push-failure
-        guard; e2e test added with fake git/gh shims asserting correct command order and
-        push-failure handling.
       rework_count: 0
-      base_branch: sprint-smoketest-followups
-      branch: 2-reviewer-must-push-branch-before-opening
-      branch_prepared_by: dev-run-2
-      branch_prepared_at: 2026-05-14T02:25:56.610Z
-      artefacts:
-        - git:dcc319ac7075fcb3ce1ecffdc1e75b2e487fed9c
-        - plugins/sprint-orchestrator/agents/reviewer.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: >
-      During the smoketest with pr_per_story enabled, the reviewer committed story work to a
-      per-story branch but never pushed it to origin. `gh pr create` either failed silently or was
-      never invoked. Result: zero PRs on GitHub despite both stories shipping locally.
+      Failed stories today persist last_failure_reason: "Acceptance criteria failed: shell, shell,
+      shell" — lists check TYPES, not which command, exit code, or output. Useless for diagnosis.
 
 
-      Reviewer agent prompt must mandate the sequence:
-        1. confirm commits exist on the per-story branch
-        2. `git push -u origin <branch>`
-        3. `gh pr create ...`
-        4. then call recordStorySuccess
+      Extend the failure-recording path to capture per-failed-check structured details:
+        - cmd: verbatim command string
+        - exit_code: observed exit code
+        - expected_exit: expected exit code from the AC
+        - stderr: last 20 lines (truncated; sanitised)
+        - stdout: last 20 lines (truncated; sanitised) — for cases where AC checks rely on stdout
+        - recorded_at: UTC ISO timestamp
 
 
-      e2e test "reviewer pushes branch before pr create" must assert (via a fake git/gh shim) that
-      push happens before pr create, and that the reviewer surfaces a clear failure if push fails
-      (rather than calling recordStorySuccess on un-pushed work).
+      Persist as orchestrator.failure_details: array of objects, one per failed check.
+      last_failure_reason becomes a human-readable summary derived from the array: "AC failed: `cmd`
+      exited 1, expected 0" or similar.
 
 
-      Out of scope: actually opening real PRs in the test — use a shim that records the command
-      order. Real-PR integration tested manually.
+      Depends on Story 1 because the schema changes are easier to land together (both touch
+      state/schema.ts and the failure-recording tools).
+
+
+      AC VERIFICATION:
+        New mini-run runStructuredFailureDetailsMiniRun behind grep tag
+        "recordStoryFailure persists structured details, not just check types". Real sprint with a
+        deliberately-failing shell AC (e.g. `false`), call recordStoryFailure through the real MCP
+        tool, assert orchestrator.failure_details[0].cmd is the literal failing command and
+        failure_details[0].exit_code matches reality.
   - id: "3"
-    title: pr_per_story prompt fires before first claim, not mid-sprint
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: grep -qE "pr_per_story.*before.*claimStory|setup.*before.*main loop"
-            plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "pr_per_story setup fires before first claim"
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-run-3
-      claimed_at: 2026-05-14T02:33:34.129Z
-      rework_count: 0
-      base_branch: sprint-smoketest-followups
-      branch: 3-pr-per-story-prompt-fires-before-first-c
-      branch_prepared_by: dev-run-3
-      branch_prepared_at: 2026-05-14T02:33:37.574Z
-      completed_at: 2026-05-14T02:37:34.263Z
-      summary: pr_per_story setup question is now documented and enforced to run before the main loop's
-        first claimStory, with an e2e test asserting the ordering and all verify checks passing.
-      artefacts:
-        - git:b5df41fa061cb625bdc46dfbbace57d31eae93f5
-        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
-    notes: >
-      Symptom from the smoketest: the pr_per_story setup prompt fires correctly on first
-      `getOrInitConfig`, but only inside the main loop. By the time the user answers "yes per-story
-      PRs," story 1 has already been claimed and committed on the invocation branch — meaning
-      `default_base` is now stale relative to story 1's branch, so `prepareStoryBranch` for story 2
-      fails with the default_base-stale guard. Sprint stops mid-flight.
-
-
-      Fix: the SKILL.md `process-backlog` setup section must explicitly run the pr_per_story setup
-      question and persistence step BEFORE the main loop's first `claimStory`. If the user opts in
-      mid-sprint, surface a clear "rerun from a clean branch" message rather than
-      partial-application.
-
-
-      e2e test "pr_per_story setup fires before first claim" must assert: when config is missing
-      pr_per_story, the orchestrator stops with the setup question before any story is claimed.
-  - id: "4"
-    title: releaseClaimForStory MCP tool for fast recovery
+    title: prepareStoryBranch understands dependency-rooted bases
     status: ready
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: test -f plugins/sprint-orchestrator/packages/mcp-server/src/tools/release-claim-for-story.ts
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q releaseClaimForStory plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "releaseClaimForStory"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "prepareStoryBranch roots off depends_on
+            story branch tip when present"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
@@ -164,34 +125,168 @@ stories:
     orchestrator:
       rework_count: 0
     notes: >
-      During the smoketest, when `prepareStoryBranch` for story 2 hit the default_base-stale guard
-      immediately after `claimStory`, story 2 was stuck in `in_progress` with a fresh claim.
-      `releaseStaleClaims` couldn't help (claim too recent), and the only recovery was hand-editing
-      sprint-status.yaml. Bad UX for a state the orchestrator created.
+      With pr_per_story=true, story N+1's prepareStoryBranch today roots off default_base instead of
+      story N's branch tip. Two failure modes observed: explicit default_base-stale refusal, AND
+      silent collapse where N's commits end up on N+1's branch (both stories merged into ONE PR).
 
 
-      New tool `releaseClaimForStory(storyId, agentId)`:
-        - Resets the named story from `in_progress` back to `ready` IF the supplied agentId
-          matches the current claim holder (otherwise reject — protects against cross-agent
-          tampering).
-        - Idempotent: if the story isn't claimed, succeed silently.
-        - No time-based threshold — this is the immediate-recovery path.
+      Fix in prepareStoryBranch (packages/mcp-server/src/tools/prepare-story-branch.ts):
+
+        - When the requested story has depends_on listing one or more `done` stories whose
+          orchestrator.branch field is set AND that branch exists locally, root the new branch off
+          the most recent depended-on story's branch tip — NOT default_base.
+
+        - When depends_on is empty, fall back to current behaviour (root off default_base).
+
+        - When depends_on points at stories with no local branch (e.g. another machine), fall back
+          to default_base AND surface a warning string in the response — same default_base-stale
+          surface as today, but now correctly explaining the root cause.
 
 
-      e2e test "releaseClaimForStory" must cover: happy path (claim then release), agentId mismatch
-      rejection, and idempotency.
+      Optional sub-task (do if cheap, defer otherwise): auto-advance default_base after
+      recordStorySuccess when sprint config opts in (new field auto_advance_default_base, default
+      false). Useful for linear sprints with no dependency graph. If it expands the story
+      significantly, log as a follow-up instead.
 
 
-      Document in SKILL.md as the recovery tool to call when prepareStoryBranch fails immediately
-      after claimStory.
+      AC VERIFICATION:
+        New mini-run runPrepareStoryBranchDependencyBaseMiniRun behind grep tag
+        "prepareStoryBranch roots off depends_on story branch tip when present". Sets up a real git
+        repo with two stories (id "1" and "2", where 2 depends_on ["1"]). Manually marks story 1
+        as `done` with a real per-story branch and an orchestrator.branch field. Calls
+        prepareStoryBranch for story 2 through the real MCP tool. Asserts the new branch was
+        created off story 1's tip via `git merge-base --is-ancestor`. Plus a negative case: a
+        story with empty depends_on roots off default_base as before.
+  - id: "4"
+    title: recordStorySuccess refuses without a pushed PR when pr_per_story=true
+    status: ready
+    depends_on:
+      - "1"
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "recordStorySuccess refuses when
+            pr_per_story=true and branch is unpushed"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    orchestrator:
+      rework_count: 0
+    notes: >
+      Prose-level instruction in agents/reviewer.md does not reliably make the reviewer push the
+      branch before calling gh pr create. Confirmed empirically — Jack added the instruction after
+      Story 2 of sprint-smoketest-followups, and Stories 2 and 3 STILL didn't reliably open PRs.
+      Only Story 4 did, and only because Jack duplicated the instruction in the spawn prompt. State
+      machine > prose.
+
+
+      In recordStorySuccess (packages/mcp-server/src/tools/mark-story-complete.ts or wherever
+      recordStorySuccess lives):
+
+        - When config.pr_per_story === true, BEFORE persisting the success:
+            * Push check: `git rev-parse origin/<branch>` exists AND its SHA equals
+              `git rev-parse <branch>` (no unpushed commits).
+            * PR check: `gh pr list --head <branch> --json number,state` returns at least one PR.
+
+        - On either check failing: return structured { ok: false, reason:
+          "pr_per_story_requires_pushed_pr", details: { branch, missing: ["push" | "pr"] } }.
+          The existing claim stays in place; the reviewer can push and retry.
+
+        - When config.pr_per_story === false: skip the checks entirely (preserve existing
+          behaviour).
+
+
+      OPEN QUESTION FOR THE DEV: gh pr list adds latency to every recordStorySuccess call. Probably
+      fine (single-digit seconds), but if it bites in practice, fall back to a git ls-remote check
+      for branch existence on origin and accept "branch pushed but no PR" as a less-protected
+      failure mode. Decide during implementation.
+
+
+      Depends on Story 1 because Story 1's dev_returned_at backstop lands first; Story 4's refusal
+      composes on top of that check.
+
+
+      AC VERIFICATION:
+        New mini-run runPrPerStoryEnforcementMiniRun behind grep tag
+        "recordStorySuccess refuses when pr_per_story=true and branch is unpushed". Real temp git
+        repo with config.pr_per_story=true, a local-only branch with commits but no remote push,
+        no PR. Calls recordStorySuccess through the real MCP tool. Asserts refusal with the
+        structured reason. Plus a positive case: push the branch, create a stub PR (or mock
+        gh pr list to return a hit), assert tool succeeds. The positive case may need a small
+        shim for gh — see the dev notes during implementation.
   - id: "5"
-    title: Ship gate — pnpm e2e + pnpm verify green
+    title: Document recordStoryReopen as the manual-override recovery path
+    status: ready
+    depends_on:
+      - "1"
+      - "2"
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: grep -q recordStoryReopen plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+          expect_exit: 0
+        - type: shell
+          cmd: grep -q recordStoryReopen plugins/sprint-orchestrator/README.md
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "recordStoryReopen resets a failed story to
+            ready and persists the reopen event"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    orchestrator:
+      rework_count: 0
+    notes: >
+      recordStoryReopen already exists as an MCP tool but its semantics, when-to-use guidance, and
+      user-facing surface are undocumented. When the orchestrator state gets wedged, the user has no
+      documented escape hatch and ends up hand-editing sprint-status.yaml.
+
+
+      Concrete actions:
+
+        - Audit the existing recordStoryReopen implementation
+          (packages/mcp-server/src/tools/record-story-reopen.ts). Confirm: what state transitions
+          it allows (failed -> ready? in_progress -> ready?), what fields it resets
+          (last_failure_reason? failure_details? claim?), whether it persists a reopen_events[]
+          audit trail.
+
+        - If the audit trail isn't there: add it. Schema: reopen_events: array of { reopened_at,
+          reopened_by_agent_id, previous_status, previous_failure_reason, reason }.
+
+        - Add a paragraph to process-backlog/SKILL.md documenting WHEN the orchestrator should
+          surface the reopen option to the user (e.g. "if a story's failure looks spurious, ask
+          the user before reopening"). Don't auto-reopen — user-gated.
+
+        - Add a paragraph to the plugin README (the one being rewritten in MVP polish Story 1.3,
+          which has NOT shipped yet — so add to the CURRENT plugin README's appropriate section,
+          and the MVP polish dev for 1.3 will integrate it during the rewrite).
+
+        - SKIP the slash-command wrapper. Direct MCP tool invocation is sufficient surface area
+          for v1; revisit if user feedback says otherwise.
+
+
+      Depends on Story 1 (dev_returned_at marker semantics affect what reopen needs to reset) and
+      Story 2 (failure_details schema affects what reopen needs to preserve in audit trail).
+
+
+      AC VERIFICATION:
+        New mini-run runRecordStoryReopenAuditMiniRun behind grep tag
+        "recordStoryReopen resets a failed story to ready and persists the reopen event". Real
+        sprint with a failed story (set up via Story 2's structured failure path). Call
+        recordStoryReopen through the real MCP tool. Assert: story status transitions
+        failed -> ready, last_failure_reason cleared, failure_details cleared, reopen_events[]
+        gets a new entry with the previous failure_reason preserved.
+  - id: "6"
+    title: Ship gate — pnpm e2e + pnpm verify green + manual pr_per_story=true smoketest
     status: ready
     depends_on:
       - "1"
       - "2"
       - "3"
       - "4"
+      - "5"
     acceptance_criteria:
       checks:
         - type: shell
@@ -203,10 +298,29 @@ stories:
     orchestrator:
       rework_count: 0
     notes: >
-      Verification-only ship gate per planning-discipline Rule 3. All four follow-up stories must
-      integrate cleanly — green per-story review is necessary but not sufficient.
+      Verification-only ship gate per planning-discipline Rule 3. Mechanical gates above. Plus a
+      MANUAL gate: Jack runs a small 2-3 story sprint with pr_per_story=true (the same
+      sprint-smoketest-followups pattern from 2026-05-14, OR a fresh tiny sprint) and confirms:
 
 
-      No manual gate this time — the manual install-from-clean smoketest is what surfaced these
-      issues in the first place. Re-running it is a sensible bonus check but not part of this
-      sprint's mechanical gate.
+        1. No spurious failures pre-implementation (Story 1 verified live).
+
+        2. Any failure has structured details visible in sprint-status.yaml (Story 2 verified
+           live).
+
+        3. Story 2's branch correctly roots off Story 1's tip — separate PR per story, no
+           collapse (Story 3 verified live).
+
+        4. Reviewer can't mark a story `done` if it forgot to push the branch — the state machine
+           refuses cleanly (Story 4 verified live).
+
+        5. If Jack ever needs the reopen path, the docs explain when to use it (Story 5 verified
+           by reading the docs).
+
+
+      The manual smoketest result (pass / fail + notes per the 5 checks above) is recorded in the
+      reviewer summary before recordStorySuccess. If any check fails, route rework to the offending
+      story (1-5), NOT to the ship gate.
+
+
+      Once this ship gate passes, MVP polish (brief-mvp-polish.md) is unblocked and can re-launch.
