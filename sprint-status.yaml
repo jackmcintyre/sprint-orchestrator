@@ -26,16 +26,16 @@ stories:
     orchestrator:
       claimed_by: dev-90219e38
       claimed_at: 2026-05-14T11:11:56.512Z
-      rework_count: 0
-      base_branch: main
-      branch: 1-move-sprint-status-yaml-out-of-git-run-l
-      branch_prepared_by: dev-90219e38
-      branch_prepared_at: 2026-05-14T11:12:00.555Z
       completed_at: 2026-05-14T11:41:29.949Z
       summary: "State machine moved out of git: canonical state now lives in
         .sprint-orchestrator/state.yaml (gitignored), all write tools stop creating git commits for
         state mutations, and every transition is appended to .sprint-orchestrator/run.log as the
         audit trail."
+      rework_count: 0
+      base_branch: main
+      branch: 1-move-sprint-status-yaml-out-of-git-run-l
+      branch_prepared_by: dev-90219e38
+      branch_prepared_at: 2026-05-14T11:12:00.555Z
       artefacts:
         - git:3391873e1383788c9f45015b26299df433324249
         - pr:https://github.com/jackmcintyre/sprint-orchestrator/pull/41
@@ -93,7 +93,7 @@ stories:
       replace with migration prompt OR remove cleanly.
   - id: "2"
     title: Reviewer empty-commit on zero-diff ship-gate stories (B8 fix)
-    status: ready
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -110,7 +110,22 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-90219e38-s2
+      claimed_at: 2026-05-14T11:41:38.925Z
       rework_count: 0
+      base_branch: 1-move-sprint-status-yaml-out-of-git-run-l
+      branch: 2-reviewer-empty-commit-on-zero-diff-ship
+      branch_prepared_by: dev-90219e38-s2
+      branch_prepared_at: 2026-05-14T11:41:43.940Z
+      completed_at: 2026-05-14T11:54:09.779Z
+      summary: Added SHIP_GATE_EMPTY_COMMIT_MESSAGE_PREFIX constant and extended commitStoryArtefacts to
+        auto-lay an empty commit for zero-diff stories under pr_per_story=true, unblocking ship-gate
+        stories from the "No commits between" gh pr create error.
+      artefacts:
+        - git:c0ce755815fc0bd09fba33ea9f6a05cbff5b058e
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/ship-gate-phrases.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: >
       Problem: verification-only stories make zero commits. gh pr create returns "No commits between
       main and the story branch", no PR opens, state machine refuses recordStorySuccess. Every
