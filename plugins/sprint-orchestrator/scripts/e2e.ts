@@ -3427,6 +3427,18 @@ async function main(): Promise<number> {
     outcomes.push(...devReturnedOutcomes);
   }
 
+  // structured-failure-details sprint, story 2: recordStoryFailure persists
+  // structured per-check details (cmd, exit_code, expected_exit, stderr, stdout,
+  // recorded_at) under orchestrator.failure_details.
+  if (
+    !filter ||
+    filter.test("recordStoryFailure persists structured details, not just check types")
+  ) {
+    console.log("[e2e] mini-run: recordStoryFailure persists structured details");
+    const structuredFailureOutcomes = await runStructuredFailureDetailsMiniRun();
+    outcomes.push(...structuredFailureOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -4481,6 +4493,212 @@ async function runDevReturnedGuardMiniRun(): Promise<AssertionOutcome[]> {
         );
       },
     });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * structured-failure-details sprint, story 2.
+ *
+ * Sets up a temp git repo with a sprint whose story has a deliberately-
+ * failing shell AC (`false`). Claims the story, marks dev returned, then
+ * calls recordStoryFailure through the real MCP tool (in-memory client).
+ * Asserts that orchestrator.failure_details[0].cmd is the literal failing
+ * command and failure_details[0].exit_code matches the observed exit code.
+ *
+ * Grep tag: "recordStoryFailure persists structured details, not just check types"
+ */
+async function runStructuredFailureDetailsMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const FAILING_CMD = "false";
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-structured-failure-"));
+  try {
+    // ── Init a minimal git repo ──────────────────────────────────────────────
+    const git = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    git(["init", "-q", "--initial-branch=main"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "Test"]);
+
+    const sprintYaml = [
+      "sprint_id: structured-failure-fixture",
+      "schema_version: 1",
+      "stories:",
+      "  - id: 'SF1'",
+      "    title: Story with deliberately failing AC",
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: shell",
+      `          cmd: "${FAILING_CMD}"`,
+      "          expect_exit: 0",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+
+    await fs.writeFile(path.join(tmp, "sprint-status.yaml"), sprintYaml, "utf8");
+    git(["add", "sprint-status.yaml"]);
+    git(["commit", "-q", "-m", "init: structured-failure fixture"]);
+
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: false",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+      configPath: path.join(configDir, "config.yaml"),
+    };
+
+    // ── Claim and mark dev returned ──────────────────────────────────────────
+    const claim = await claimStory(ctx, "SF1", "agent-sf-test");
+    if (!claim.claimed) {
+      outcomes.push({
+        name: "recordStoryFailure persists structured details, not just check types: setup claim",
+        passed: false,
+        error: `could not claim SF1: holder=${claim.holder ?? "?"}`,
+      });
+      return outcomes;
+    }
+    await markDevReturned(ctx, "SF1", "agent-sf-test");
+
+    // ── Build the failure_details the way a reviewer would ───────────────────
+    // Run the failing check so we capture real observed values.
+    const { runChecks } = await import("../packages/mcp-server/src/validators/acceptance.js");
+    const validation = await runChecks([{ type: "shell", cmd: FAILING_CMD, expect_exit: 0 }], {
+      cwd: tmp,
+    });
+    const failedResults = validation.results.filter((r) => !r.passed);
+
+    const failure_details = failedResults
+      .filter((r): r is Extract<typeof r, { type: "shell" }> => r.type === "shell")
+      .map((r) => ({
+        cmd: r.cmd,
+        exit_code: r.exit_code,
+        expected_exit: r.expected_exit,
+        stderr: r.stderr,
+        stdout: r.stdout,
+        recorded_at: new Date().toISOString(),
+      }));
+
+    // ── Drive recordStoryFailure through the real MCP tool ───────────────────
+    const server = buildServer(ctx);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "sf-test-client", version: "0.0.1" });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const toolResult = await client.callTool({
+      name: "recordStoryFailure",
+      arguments: {
+        storyId: "SF1",
+        reason: "AC validation failed",
+        failure_details,
+      },
+    });
+
+    await runOne({
+      name: "recordStoryFailure persists structured details, not just check types: tool returns ok",
+      run: () => {
+        const content = toolResult.content as Array<{ type: string; text: string }>;
+        const text = content.find((c) => c.type === "text")?.text ?? "";
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        expect(parsed.ok === true, `expected ok=true, got ${JSON.stringify(parsed)}`);
+      },
+    });
+
+    // ── Read back sprint-status and assert failure_details persisted ─────────
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const story = finalState.stories.find((s) => s.id === "SF1");
+
+    await runOne({
+      name: "recordStoryFailure persists structured details, not just check types: failure_details array present",
+      run: () => {
+        const orch = story?.orchestrator as Record<string, unknown> | undefined;
+        const details = orch?.failure_details;
+        expect(
+          Array.isArray(details),
+          `expected failure_details to be an array, got ${JSON.stringify(details)}`,
+        );
+        expect(
+          (details as unknown[]).length >= 1,
+          `expected at least 1 failure_details entry, got ${(details as unknown[]).length}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "recordStoryFailure persists structured details, not just check types: failure_details[0].cmd is the failing command",
+      run: () => {
+        const orch = story?.orchestrator as Record<string, unknown> | undefined;
+        const details = orch?.failure_details as Array<Record<string, unknown>>;
+        const first = details?.[0];
+        expect(
+          first?.cmd === FAILING_CMD,
+          `expected failure_details[0].cmd="${FAILING_CMD}", got "${String(first?.cmd)}"`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "recordStoryFailure persists structured details, not just check types: failure_details[0].exit_code matches observed exit",
+      run: () => {
+        const orch = story?.orchestrator as Record<string, unknown> | undefined;
+        const details = orch?.failure_details as Array<Record<string, unknown>>;
+        const first = details?.[0];
+        // `false` exits 1
+        expect(
+          typeof first?.exit_code === "number",
+          `expected exit_code to be a number, got ${JSON.stringify(first?.exit_code)}`,
+        );
+        expect(
+          first?.exit_code !== 0,
+          `expected non-zero exit_code for a failing command, got ${String(first?.exit_code)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "recordStoryFailure persists structured details, not just check types: last_failure_reason is derived human summary",
+      run: () => {
+        const orch = story?.orchestrator as Record<string, unknown> | undefined;
+        const reason = orch?.last_failure_reason as string | undefined;
+        expect(
+          typeof reason === "string" && reason.includes(FAILING_CMD),
+          `expected last_failure_reason to mention the failing command "${FAILING_CMD}", got "${String(reason)}"`,
+        );
+      },
+    });
+
+    await client.close();
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

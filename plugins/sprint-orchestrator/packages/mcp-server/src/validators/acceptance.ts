@@ -4,7 +4,16 @@ import * as path from "node:path";
 import { type Check } from "../state/schema.js";
 
 export type CheckResult =
-  | { type: "shell"; cmd: string; passed: boolean; exit_code: number; output: string }
+  | {
+      type: "shell";
+      cmd: string;
+      passed: boolean;
+      exit_code: number;
+      expected_exit: number;
+      output: string;
+      stdout: string;
+      stderr: string;
+    }
   | { type: "file_exists"; path: string; passed: boolean }
   | { type: "regex"; cmd: string; pattern: string; passed: boolean; output: string };
 
@@ -38,13 +47,20 @@ export async function runCheck(check: Check, opts: RunCheckOptions = {}): Promis
       }
     }
     case "shell": {
-      const { exitCode, output } = await runShell(check.cmd, { cwd, timeoutMs, env });
+      const { exitCode, output, stdout, stderr } = await runShell(check.cmd, {
+        cwd,
+        timeoutMs,
+        env,
+      });
       return {
         type: "shell",
         cmd: check.cmd,
         passed: exitCode === check.expect_exit,
         exit_code: exitCode,
+        expected_exit: check.expect_exit,
         output,
+        stdout,
+        stderr,
       };
     }
     case "regex": {
@@ -75,28 +91,49 @@ export async function runChecks(
   return { passed: results.every((r) => r.passed), results };
 }
 
+/** Return the last N lines of a string. */
+function lastLines(s: string, n: number): string {
+  const lines = s.split("\n");
+  return lines.slice(-n).join("\n");
+}
+
 async function runShell(
   cmd: string,
   opts: { cwd: string; timeoutMs: number; env: NodeJS.ProcessEnv },
-): Promise<{ exitCode: number; output: string }> {
+): Promise<{ exitCode: number; output: string; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn("sh", ["-c", cmd], { cwd: opts.cwd, env: opts.env });
-    let output = "";
+    let stdoutBuf = "";
+    let stderrBuf = "";
     let killed = false;
     const timer = setTimeout(() => {
       killed = true;
       child.kill("SIGKILL");
     }, opts.timeoutMs);
 
-    child.stdout.on("data", (d: Buffer) => (output += d.toString()));
-    child.stderr.on("data", (d: Buffer) => (output += d.toString()));
+    child.stdout.on("data", (d: Buffer) => (stdoutBuf += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (stderrBuf += d.toString()));
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ exitCode: killed ? 124 : (code ?? 1), output });
+      const stdout = lastLines(stdoutBuf, 20);
+      const stderr = lastLines(stderrBuf, 20);
+      resolve({
+        exitCode: killed ? 124 : (code ?? 1),
+        output: stdoutBuf + stderrBuf,
+        stdout,
+        stderr,
+      });
     });
     child.on("error", (err) => {
       clearTimeout(timer);
-      resolve({ exitCode: 1, output: `${output}${(err as Error).message}` });
+      const stdout = lastLines(stdoutBuf, 20);
+      const stderr = lastLines(stderrBuf + (err as Error).message, 20);
+      resolve({
+        exitCode: 1,
+        output: `${stdoutBuf}${stderrBuf}${(err as Error).message}`,
+        stdout,
+        stderr,
+      });
     });
   });
 }

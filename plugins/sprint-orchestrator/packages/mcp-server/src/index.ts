@@ -155,10 +155,25 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       title: "Record story failure",
       description:
         "Record a failure for a story with a structured reason. State-machine transition only. No silent retries. Renamed from markStoryFailed for classifier-safety.",
-      inputSchema: { storyId: z.string(), reason: z.string() },
+      inputSchema: {
+        storyId: z.string(),
+        reason: z.string(),
+        failure_details: z
+          .array(
+            z.object({
+              cmd: z.string(),
+              exit_code: z.number().int(),
+              expected_exit: z.number().int(),
+              stderr: z.string(),
+              stdout: z.string(),
+              recorded_at: z.string(),
+            }),
+          )
+          .optional(),
+      },
     },
-    async ({ storyId, reason }) => {
-      const result = await markStoryFailed(ctx, storyId, reason);
+    async ({ storyId, reason, failure_details }) => {
+      const result = await markStoryFailed(ctx, storyId, reason, failure_details);
       return json({ ok: true, ...result });
     },
   );

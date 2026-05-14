@@ -29,6 +29,18 @@ export const AcceptanceCriteria = z
   })
   .default({ checks: [] });
 
+export const FailureDetailSchema = z
+  .object({
+    cmd: z.string(),
+    exit_code: z.number().int(),
+    expected_exit: z.number().int(),
+    stderr: z.string(),
+    stdout: z.string(),
+    recorded_at: z.string().datetime({ offset: true }),
+  })
+  .passthrough();
+export type FailureDetail = z.infer<typeof FailureDetailSchema>;
+
 export const OrchestratorMeta = z
   .object({
     claimed_by: z.string().optional(),
@@ -74,6 +86,12 @@ export const OrchestratorMeta = z
       .optional(),
     /** Timestamp of the last failure. Cleared by `recordStoryReopen`. */
     failed_at: z.string().datetime({ offset: true }).optional(),
+    /**
+     * Per-failed-check structured details captured by `recordStoryFailure`.
+     * Each entry corresponds to one check that did not pass. Cleared by
+     * `recordStoryReopen` alongside `failed_at` and `last_failure_reason`.
+     */
+    failure_details: z.array(FailureDetailSchema).optional(),
     /**
      * ISO timestamp written by `markDevReturned` when the dev subagent
      * finishes its implementation swing. `recordStoryFailure` and
