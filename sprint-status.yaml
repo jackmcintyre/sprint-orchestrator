@@ -194,7 +194,7 @@ stories:
       implementation summary so the reviewer can decide whether to expand scope or defer.
   - id: "3"
     title: run-sprint refuses to launch with uncommitted sprint-status.yaml
-    status: failed
+    status: ready
     depends_on: []
     acceptance_criteria:
       checks:
@@ -215,8 +215,6 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-90219e38-s3
-      claimed_at: 2026-05-14T08:54:41.742Z
       rework_count: 1
       last_review_feedback: "AC #2 is a planning-discipline Rule 4 violation — the shell command `grep -q
         UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools` exits
@@ -236,8 +234,13 @@ stories:
       branch: 3-run-sprint-refuses-to-launch-with-uncomm
       branch_prepared_by: dev-90219e38-s3
       branch_prepared_at: 2026-05-14T08:54:45.808Z
-      last_failure_reason: "Acceptance criteria failed: shell"
-      failed_at: 2026-05-14T09:26:26.081Z
+      reopen_history:
+        - reopened_at: 2026-05-14T09:26:48.233Z
+          reason: "story 3's persist-3-completion commit (9325c5c) didn't make it onto PR #36 before merge;
+            work is genuinely shipped, this is bookkeeping recovery"
+          prior_status: failed
+          prior_failure_reason: "Acceptance criteria failed: shell"
+          reopened_by_agent_id: human-jack
     notes: >
       During the hardening sprint launch, sprint-status.yaml was never committed. When PR #29 merged
       to main, the merge overwrote the live backlog file. Manual recovery from a dangling git blob
