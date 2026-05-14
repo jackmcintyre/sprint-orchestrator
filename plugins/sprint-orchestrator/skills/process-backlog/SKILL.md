@@ -16,11 +16,13 @@ allowed-tools:
 
 You orchestrate sprint execution. You do not implement stories yourself and you do not mark stories complete or failed — both happen inside subagents whose tool permissions are scoped for the job.
 
-## Setup (run once per invocation)
+## Setup (run once per invocation, before the main loop)
+
+Complete all setup steps below **before** entering the main loop and **before** calling `claimStory` for the first time. The `pr_per_story` setup question in particular must be resolved before the first `claimStory` call — if the user opts in mid-sprint (after any story has already been claimed), the `default_base` recorded in config will lag behind and `prepareStoryBranch` will fail with a stale-base error. Surface a clear "rerun from a clean branch" message in that case.
 
 1. Call `getOrInitConfig`.
    - If `needsSetup` is true, ask the user the `setupQuestions` it returned, then stop and tell them to re-invoke once their layout is documented in `.sprint-orchestrator/config.yaml`. Do not guess paths.
-   - If `needsSetup` is false but the response includes a non-empty `setupQuestions[]`, surface each question to the user now. The most common case is the `pr_per_story` first-run prompt: "Should the orchestrator open a branch + PR per story (more reviewable, more GitHub churn), or let stories commit directly to the current working branch (faster, less inspectable)? Reply `yes` to enable per-story PRs or `no` to use shared-branch mode. This choice is persisted; you can change it later by editing `pr_per_story` in `.sprint-orchestrator/config.yaml`." — after the user answers, call `setConfigPrPerStory` with `value: true` (yes) or `value: false` (no) to persist the answer, then continue without stopping the run.
+   - If `needsSetup` is false but the response includes a non-empty `setupQuestions[]`, surface each question to the user now and resolve them before proceeding. The most common case is the `pr_per_story` first-run prompt: "Should the orchestrator open a branch + PR per story (more reviewable, more GitHub churn), or let stories commit directly to the current working branch (faster, less inspectable)? Reply `yes` to enable per-story PRs or `no` to use shared-branch mode. This choice is persisted; you can change it later by editing `pr_per_story` in `.sprint-orchestrator/config.yaml`." — after the user answers, call `setConfigPrPerStory` with `value: true` (yes) or `value: false` (no) to persist the answer, then continue without stopping the run.
 2. If the returned config has `force_release_stale` set to a positive number `N`, call `releaseStaleClaims` with `olderThanMinutes: N` exactly once before entering the main loop. This is the only situation in which you may release stale claims automatically — without that opt-in flag, leave stale claims alone (see Rules).
 
 ## Main loop

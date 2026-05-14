@@ -64,15 +64,15 @@ stories:
     orchestrator:
       claimed_by: dev-run-2
       claimed_at: 2026-05-14T02:25:53.690Z
+      completed_at: 2026-05-14T02:31:48.181Z
+      summary: Reviewer agent prompt updated to mandate git push before gh pr create, with a push-failure
+        guard; e2e test added with fake git/gh shims asserting correct command order and
+        push-failure handling.
       rework_count: 0
       base_branch: sprint-smoketest-followups
       branch: 2-reviewer-must-push-branch-before-opening
       branch_prepared_by: dev-run-2
       branch_prepared_at: 2026-05-14T02:25:56.610Z
-      completed_at: 2026-05-14T02:31:48.181Z
-      summary: Reviewer agent prompt updated to mandate git push before gh pr create, with a push-failure
-        guard; e2e test added with fake git/gh shims asserting correct command order and
-        push-failure handling.
       artefacts:
         - git:dcc319ac7075fcb3ce1ecffdc1e75b2e487fed9c
         - plugins/sprint-orchestrator/agents/reviewer.md
@@ -99,7 +99,7 @@ stories:
       order. Real-PR integration tested manually.
   - id: "3"
     title: pr_per_story prompt fires before first claim, not mid-sprint
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -114,7 +114,19 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-run-3
+      claimed_at: 2026-05-14T02:33:34.129Z
       rework_count: 0
+      base_branch: sprint-smoketest-followups
+      branch: 3-pr-per-story-prompt-fires-before-first-c
+      branch_prepared_by: dev-run-3
+      branch_prepared_at: 2026-05-14T02:33:37.574Z
+      completed_at: 2026-05-14T02:37:34.263Z
+      summary: pr_per_story setup question is now documented and enforced to run before the main loop's
+        first claimStory, with an e2e test asserting the ordering and all verify checks passing.
+      artefacts:
+        - git:b5df41fa061cb625bdc46dfbbace57d31eae93f5
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
     notes: >
       Symptom from the smoketest: the pr_per_story setup prompt fires correctly on first
       `getOrInitConfig`, but only inside the main loop. By the time the user answers "yes per-story
