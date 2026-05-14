@@ -102,6 +102,7 @@ stories:
     orchestrator:
       claimed_by: dev-90219e38-s2-retry
       claimed_at: 2026-05-14T08:37:20.428Z
+      last_failure_reason: "Acceptance criteria failed: shell, shell, shell, shell"
       rework_count: 0
       base_branch: main
       reopen_history:
@@ -117,12 +118,11 @@ stories:
             their behalf to unblock the state machine. No basis for a rework retry — the dev did
             nothing.
           reopened_by_agent_id: human-jack
+      failed_at: 2026-05-14T08:37:45.816Z
       dev_returned_at: 2026-05-14T08:15:11.724Z
       branch: 2-dev-spawn-prompt-hardening-mandatory-too
       branch_prepared_by: dev-90219e38-s2
       branch_prepared_at: 2026-05-14T08:10:07.529Z
-      last_failure_reason: "Acceptance criteria failed: shell, shell, shell, shell"
-      failed_at: 2026-05-14T08:37:45.816Z
     notes: >
       During hardening, the dev subagent stalled mid-research on 3 of 5 stories. Each needed 2–3
       spawns because the dev would reach a decision point and return early instead of finishing. Two
@@ -181,7 +181,7 @@ stories:
       implementation summary so the reviewer can decide whether to expand scope or defer.
   - id: "3"
     title: run-sprint refuses to launch with uncommitted sprint-status.yaml
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -202,7 +202,27 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      rework_count: 0
+      claimed_by: dev-90219e38-s3
+      claimed_at: 2026-05-14T08:54:41.742Z
+      rework_count: 1
+      base_branch: main
+      dev_returned_at: 2026-05-14T09:02:25.103Z
+      branch: 3-run-sprint-refuses-to-launch-with-uncomm
+      branch_prepared_by: dev-90219e38-s3
+      branch_prepared_at: 2026-05-14T08:54:45.808Z
+      last_review_feedback: "AC #2 is a planning-discipline Rule 4 violation — the shell command `grep -q
+        UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools` exits
+        2 because grep refuses to search a directory without the -r flag. The constant
+        UNCOMMITTED_BACKLOG_REFUSAL is correctly implemented in run-sprint-preflight-phrases.ts (the
+        new file under that directory), and all other ACs pass (SKILL.md update,
+        planning-discipline.md rule, e2e 3/3, pnpm verify 127 tests). Fix required: change AC #2 cmd
+        to either `grep -rq UNCOMMITTED_BACKLOG_REFUSAL
+        plugins/sprint-orchestrator/packages/mcp-server/src/tools` OR `grep -q
+        UNCOMMITTED_BACKLOG_REFUSAL
+        plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-preflight-phrases.ts`.
+        Do not change any implementation — only the acceptance criterion shell command needs
+        repair."
+      last_review_at: 2026-05-14T09:07:00.771Z
     notes: >
       During the hardening sprint launch, sprint-status.yaml was never committed. When PR #29 merged
       to main, the merge overwrote the live backlog file. Manual recovery from a dangling git blob
