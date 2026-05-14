@@ -18,6 +18,7 @@ import { commitStoryArtefacts } from "./tools/commit-story-artefacts.js";
 import { lintSprint } from "./tools/lint-sprint.js";
 import { prepareStoryBranch } from "./tools/prepare-story-branch.js";
 import { recordStoryReopen } from "./tools/record-story-reopen.js";
+import { resolveSpawnModel } from "./tools/resolve-spawn-model.js";
 
 export const PLUGIN_NAME = "sprint-orchestrator";
 
@@ -212,6 +213,20 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       inputSchema: { sprintStatusPath: z.string().optional() },
     },
     async ({ sprintStatusPath }) => json(await lintSprint(ctx, { sprintStatusPath })),
+  );
+
+  server.registerTool(
+    "resolveSpawnModel",
+    {
+      title: "Resolve spawn model",
+      description:
+        "Return the model ID the orchestrator should pass to Task when spawning a `dev` or `reviewer` subagent for a story. Resolution order: config.models[role], then the agent file's `model:` frontmatter, then the DEFAULT_*_MODEL fallback. Story 1 of model-tiering-v1 — no escalation logic yet.",
+      inputSchema: {
+        storyId: z.string(),
+        role: z.enum(["dev", "reviewer"]),
+      },
+    },
+    async ({ storyId, role }) => json(await resolveSpawnModel(ctx, { storyId, role })),
   );
 
   server.registerTool(

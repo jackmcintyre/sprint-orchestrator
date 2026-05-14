@@ -1,188 +1,218 @@
-sprint_id: bmad-adaptor
+sprint_id: model-tiering-v1
 stories:
   - id: "1"
-    title: /sprint-orchestrator:adapt-bmad — deterministic BMad → orchestrator adaptor skill + pure helper
+    title: Per-agent model defaults — frontmatter + config + resolveSpawnModel MCP tool
     status: done
     depends_on: []
     acceptance_criteria:
       checks:
         - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "resolveSpawnModel respects frontmatter and
+            config override"
+          expect_exit: 0
+        - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-bmad-1
-      claimed_at: 2026-05-13T13:16:16.812Z
-      completed_at: 2026-05-13T13:40:46.275Z
-      summary: Shipped deterministic /sprint-orchestrator:adapt-bmad skill plus pure adaptBmadOutput
-        helper that converts BMad epics + story Verification sections into a conforming
-        sprint-status.yaml.
+      claimed_by: dev-run-1763100000
+      claimed_at: 2026-05-13T23:16:24.263Z
+      completed_at: 2026-05-13T23:28:28.305Z
+      summary: Added per-agent model defaults via dev/reviewer frontmatter, optional config.models block,
+        and a new resolveSpawnModel MCP tool with phrase-locked SKILL.md spawn instruction.
       rework_count: 0
       artefacts:
-        - git:870c27e4e9db88275ab3db7449c0d8ba50eb53d8
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/adapt-bmad.ts
-        - plugins/sprint-orchestrator/skills/adapt-bmad/SKILL.md
-        - sprint-status.yaml
+        - git:6640bbe50c92f6a717b2d39cad3e129fffed1a86
+        - plugins/sprint-orchestrator/agents/dev.md
+        - plugins/sprint-orchestrator/agents/reviewer.md
+        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/context.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/model-tiering-defaults.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/process-backlog-spawn-phrases.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/resolve-spawn-model.ts
+        - plugins/sprint-orchestrator/scripts/e2e.ts
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
     notes: >
-      PROBLEM: today the only way into the orchestrator from BMad-authored stories is the universal
-      /sprint-orchestrator:adopt skill (LLM-mediated, source-agnostic, requires user review). For
-      BMad — a producer we use daily — we want a faster, deterministic fast path that validates the
-      adaptor pattern we documented in the prior sprint.
+      PROBLEM: today every dev and reviewer Task spawn inherits the parent session's model. Jack's
+      sessions run on Opus 4.7, so every routine implementation and review burns Opus tokens. The
+      static portion of brief-model-tiering's v1 fixes this without any escalation logic.
 
 
-      DECISION: ship a separate skill /sprint-orchestrator:adapt-bmad <bmad-output-dir> that reads
-      BMad's epic doc + per-story .md files and produces a conforming sprint-status.yaml
-      deterministically. No LLM step. Universal /adopt stays producer-agnostic; adapt-bmad is the
-      producer-named fast path.
+      DECISION: three changes wired together.
+
+        1. Add `model:` frontmatter to plugins/sprint-orchestrator/agents/dev.md and
+           agents/reviewer.md with the value `claude-sonnet-4-6`. This is the static default if no
+           config override exists.
+
+        2. Extend the config schema (plugins/sprint-orchestrator/packages/mcp-server/src/state/
+           config-schema.ts or wherever the .sprint-orchestrator/config.yaml shape is defined)
+           with an optional `models:` block:
+
+             models:
+               dev: <model-id, optional>
+               reviewer: <model-id, optional>
+
+           Config values, when present, override the agent-file frontmatter at spawn time.
+
+        3. New MCP tool resolveSpawnModel({ storyId, role }) → { model: string }. Reads the
+           config + the agent file's frontmatter and returns the model ID the orchestrator should
+           pass to the Task tool when spawning. NO escalation logic in this story — Story 2 adds
+           that branch. Resolution order:
+             - config.models[role] if set
+             - agent-file frontmatter `model:` field
+             - fallback constant exported from a new module:
+               packages/mcp-server/src/tools/model-tiering-defaults.ts exporting
+               DEFAULT_DEV_MODEL = "claude-sonnet-4-6" and DEFAULT_REVIEWER_MODEL =
+               "claude-sonnet-4-6". The fallback exists so the resolver works in tests that
+               don't ship agent files.
+
+        4. Update plugins/sprint-orchestrator/skills/process-backlog/SKILL.md step 5 (dev spawn)
+           and step 6 (reviewer spawn) to call resolveSpawnModel BEFORE each Task call and pass
+           the returned model ID via Task's `model` parameter. Phrase-lock the resolver-call
+           instruction via a new module
+           packages/mcp-server/src/tools/process-backlog-spawn-phrases.ts exporting
+           RESOLVE_SPAWN_MODEL_INSTRUCTION (the exact sentence appears verbatim in SKILL.md).
 
 
-      BMAD-SIDE CONVENTION (defines the schema this adaptor consumes):
-        - Each BMad story file in the implementation-artifacts dir must contain a "## Verification" section. The section contains one or more shell commands the orchestrator should run to verify the story's AC, in the format:
-            ```
-            ## Verification
+      MODEL IDS:
+        - Sonnet: "claude-sonnet-4-6"
+        - Opus: "claude-opus-4-7"
+        (Defined as constants in model-tiering-defaults.ts to keep them in one place.)
 
-            ```shell
-            pnpm --dir plugins/sprint-orchestrator e2e --grep "<grep-tag>"
-            ```
-            ```
-        - Each fenced shell block becomes one `type: shell` check in the orchestrator's acceptance_criteria.
-        - Exit code is implicit: 0 for success (typical case). To assert a non-zero exit, the convention is a comment line `# expect_exit: <N>` inside the fence (uncommon; covered by the spec but not the goldens this sprint).
-        - If a story file lacks the Verification section, the adaptor refuses with a clear message naming the story file. No defaults; we want authoring discipline, not silent fallback.
 
-      ADAPTOR BEHAVIOUR:
-        - Reads BMad's epic doc at <bmad-output-dir>/planning-artifacts/epics.md to extract the story sequence (epic.story IDs and titles).
-        - Reads each BMad story file at <bmad-output-dir>/implementation-artifacts/<story-key>.md.
-        - Extracts the Verification section's shell command(s) into acceptance_criteria.checks.
-        - Sequential dependencies inferred from BMad story order: story 1-2 depends_on 1-1, 1-3 depends_on 1-2, etc. (Future enhancement: explicit dependency declarations in BMad story frontmatter. Out of scope this sprint.)
-        - Story id format: orchestrator-friendly sequential integers ("1", "2", "3", ...) regardless of BMad's "1.1" / "1.2" epic.story numbering. The BMad ID is preserved in the notes field for traceability.
-        - The notes field is populated with a short pointer to the BMad story file path; the dev/reviewer can read it for full context (no need to inline the entire BMad spec).
-        - Output: a conforming sprint-status.yaml that passes lintSprint. The adaptor writes via the same atomic helper used by /adopt (reuse validateAndWriteBacklog from packages/mcp-server/src/tools/adopt-write.ts).
+      RATE-LIMIT FALLBACK: out of v1 scope per the brief's locked decisions. resolveSpawnModel
+      returns the desired model ID; the Task tool itself handles availability. If a model is
+      unavailable Claude Code's spawn behaviour is whatever it is today — no new fallback logic.
+
 
       FILES TO TOUCH:
-        - plugins/sprint-orchestrator/skills/adapt-bmad/SKILL.md (NEW)
-            * Argument: <bmad-output-dir> (required, defaults to "_bmad-output" if conventional).
-            * Optional: --force (passed through to validateAndWriteBacklog).
-            * No LLM subagent. No user review step (deterministic — what you put in is what you get).
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/adapt-bmad.ts (NEW)
-            * export adaptBmadOutput({ bmadOutputDir }): { ok: true, proposalYaml } | { ok: false, reason }
-            * Pure function — directly testable from scripts/e2e.ts (no implicit globals, no file writes).
-            * Parses BMad epic doc + story files. Refuses on missing Verification section, missing epic doc, missing story file, or malformed shell fences.
-        - plugins/sprint-orchestrator/skills/adapt-bmad/SKILL.md should call adaptBmadOutput() to produce the YAML, then hand off to validateAndWriteBacklog from adopt-write.ts for the actual schema validation + atomic write.
+        - plugins/sprint-orchestrator/agents/dev.md (add `model:` frontmatter)
+        - plugins/sprint-orchestrator/agents/reviewer.md (add `model:` frontmatter)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/state/config-schema.ts (extend
+          schema with optional models block)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/model-tiering-defaults.ts (NEW)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/resolve-spawn-model.ts (NEW)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/process-backlog-spawn-phrases.ts (NEW)
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md (call resolveSpawnModel
+          before each Task spawn; embed RESOLVE_SPAWN_MODEL_INSTRUCTION verbatim)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/server.ts (register the new MCP
+          tool)
+        - plugins/sprint-orchestrator/scripts/e2e.ts (new mini-run, see AC verification)
 
-      COUPLING DISCIPLINE:
-        - Orchestrator core (MCP server, state machine, process-backlog skill) MUST NOT import adapt-bmad.ts or anything from skills/adapt-bmad/. Adapter depends on lintSprint, getOrInitConfig, and validateAndWriteBacklog (reused from adopt-write.ts); none of those depend on adapter.
-        - The /adopt skill MUST NOT reference adapt-bmad. They are siblings, both depending on the schema, neither depending on the other.
 
-      AC VERIFICATION:
-        - pnpm --dir plugins/sprint-orchestrator verify must pass (build + typecheck + lint + unit tests). Behavioural correctness is Story 2's e2e responsibility.
+      AC VERIFICATION (planning-discipline Rule 1 — real MCP tool, real files):
+        New mini-run runResolveSpawnModelStaticMiniRun behind grep tag
+        "resolveSpawnModel respects frontmatter and config override". Sets up a temp directory
+        with a real .sprint-orchestrator/config.yaml fixture, a real sprint-status.yaml fixture,
+        and stub agent files. Invokes the registered resolveSpawnModel MCP tool (NOT the helper,
+        NOT a mock) and asserts the resolved model ID. Four fixtures:
 
-      OUT OF SCOPE:
-        - Auto-detection of BMad shape inside /adopt. /adopt stays oblivious.
-        - Parallel dependency declarations beyond sequential. BMad story files may carry a `depends_on:` frontmatter field in a future sprint.
-        - Editing existing BMad-authored story files to add Verification sections. Story 2's goldens are net-new fixtures.
+          * frontmatter-only/ — agent file says claude-sonnet-4-6, no models block in config.
+            Resolver returns "claude-sonnet-4-6" for role=dev.
+          * config-override/ — agent file says claude-sonnet-4-6, config says
+            models.dev: claude-opus-4-7. Resolver returns "claude-opus-4-7" for role=dev (config
+            wins).
+          * no-frontmatter-no-config/ — agent file missing the model field, no models block.
+            Resolver returns DEFAULT_DEV_MODEL ("claude-sonnet-4-6") for role=dev.
+          * reviewer-role/ — agent file says claude-sonnet-4-6 in reviewer.md, config has no
+            models.reviewer. Resolver returns "claude-sonnet-4-6" for role=reviewer.
+
+        Plus a phrase-lock assertion: SKILL.md contains RESOLVE_SPAWN_MODEL_INSTRUCTION verbatim.
+
+        Story 1 does NOT exercise the rework-escalation branch. That's Story 2's mini-run.
+
+
+      OUT OF SCOPE FOR STORY 1:
+        - Rework escalation (Story 2).
+        - Cost telemetry, model_history schema, per-story tier override, AC-complexity
+          heuristic — all deferred to later slices per the brief.
+        - Haiku tier for skill calls or fan-out — out of v1.
+        - Changing the parent-session model (Jack's own Claude Code session model is unaffected).
   - id: "2"
-    title: Deterministic e2e coverage for adapt-bmad — happy path, missing Verification refusal,
-      malformed input refusal
+    title: Rework escalation — dev re-spawn after rework jumps to Opus
     status: done
     depends_on:
       - "1"
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "adapt-bmad happy path missing-verification
-            refusal malformed refusal"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "resolveSpawnModel escalates dev on rework
+            only"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-bmad-2
-      claimed_at: 2026-05-13T13:40:58.795Z
-      completed_at: 2026-05-13T13:46:44.225Z
-      summary: Added adapt-bmad e2e mini-run with happy/missing-verification/malformed fixtures locking in
-        adaptor behaviour.
+      claimed_by: dev-run-1763100002
+      claimed_at: 2026-05-13T23:28:36.706Z
+      completed_at: 2026-05-13T23:32:20.304Z
+      summary: resolveSpawnModel now escalates dev re-spawns to Opus when rework_count > 0; reviewer tier
+        unchanged. New e2e mini-run verifies all four fixture cases.
       rework_count: 0
       artefacts:
-        - git:ee86e8505a61fe8dd5aab5eff3ce03b7ccbca698
+        - git:940359af96f6e059c74aee90dbbd55ea7b50f656
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/model-tiering-defaults.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/resolve-spawn-model.ts
         - plugins/sprint-orchestrator/scripts/e2e.ts
-        - plugins/sprint-orchestrator/scripts/fixtures/adapt-bmad/
     notes: >
-      PROBLEM: Story 1 ships the deterministic adaptor. Story 2 locks the behaviour with e2e
-      assertions that exercise the helper directly (not the skill body — same approach we used for
-      adopt-write).
+      PROBLEM: even with Story 1's static defaults, a story that failed once at Sonnet will retry at
+      Sonnet — same model, same failure mode likely. The brief's locked v1 escalation rule is "dev
+      attempts after rework run on Opus." This story adds that one branch.
 
 
-      WHAT TO BUILD:
-        - Extend plugins/sprint-orchestrator/scripts/e2e.ts with runAdaptBmadMiniRun() behind grep tag "adapt-bmad happy path missing-verification refusal malformed refusal".
-        - Three golden-fixture BMad directories under plugins/sprint-orchestrator/scripts/fixtures/adapt-bmad/:
-            * happy/ — a minimal valid BMad output: planning-artifacts/epics.md with 1 epic, 2 stories, sequential; implementation-artifacts/<story-key>.md files for both, each with a valid Verification section.
-            * missing-verification/ — same shape as happy/, but the second story file omits the Verification section.
-            * malformed/ — same shape as happy/, but the first story file has a broken shell fence (e.g. unclosed code block, or no shell command inside the fence).
+      DECISION: extend resolveSpawnModel (from Story 1) with a rework branch. Pseudocode:
 
-      ASSERTIONS:
-        (a) Happy path: adaptBmadOutput({ bmadOutputDir: ".../happy" }) → { ok: true }. The proposalYaml parses as YAML, lintSprint accepts it, the story array has length 2, each story has the expected id ("1", "2"), expected title (matching the BMad story title), and expected acceptance_criteria.checks (matching the shell command from the Verification section). depends_on: [] for story 1; depends_on: ["1"] for story 2.
-        (b) Missing Verification: adaptBmadOutput on the missing-verification fixture → { ok: false }. The reason names the offending story file. No partial output. No file write attempted (helper is pure — no side effects to verify, but assert reason is informative).
-        (c) Malformed shell fence: adaptBmadOutput on the malformed fixture → { ok: false }. The reason names the offending story file and indicates the malformed-fence nature.
+        function resolveSpawnModel({ storyId, role }) {
+          const reworkCount = readReworkCount(storyId);          // from sprint-status.yaml
+          if (role === "dev" && reworkCount > 0) {
+            return DEEP_MODEL;                                    // "claude-opus-4-7"
+          }
+          return resolveStatic(role);                             // Story 1's resolution
+        }
 
-      CONVENTIONS:
-        - Mirror prior mini-runs: runAdoptValidateAndWriteMiniRun, runReadmeDocumentsAdoptAndAdaptorPatternMiniRun.
-        - Use the existing scripts/fixtures/ convention from Story 2 of the adopt-skill sprint.
+        Reviewer is NOT escalated — the brief's locked decision. Reworked story re-spawned for
+        review still uses the reviewer's static-default tier.
+
+
+      DEEP_MODEL CONSTANT: add DEEP_MODEL = "claude-opus-4-7" to model-tiering-defaults.ts (already
+      created in Story 1).
+
+
+      FILES TO TOUCH:
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/resolve-spawn-model.ts
+          (extend with rework branch)
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/model-tiering-defaults.ts
+          (add DEEP_MODEL constant)
+        - plugins/sprint-orchestrator/scripts/e2e.ts (new mini-run, see AC verification)
+
+
+      AC VERIFICATION (planning-discipline Rule 1 — real MCP tool, real files):
+        New mini-run runResolveSpawnModelEscalationMiniRun behind grep tag
+        "resolveSpawnModel escalates dev on rework only". Temp directory with real
+        sprint-status.yaml + config.yaml. Invokes the registered resolveSpawnModel MCP tool
+        against four fixtures:
+
+          * fresh-dev/ — rework_count: 0, role=dev. Resolver returns the static default
+            (Sonnet from frontmatter or config).
+          * reworked-dev/ — rework_count: 1, role=dev. Resolver returns "claude-opus-4-7"
+            REGARDLESS of frontmatter or config (rework escalation overrides).
+          * reworked-dev-multiple/ — rework_count: 2, role=dev. Same as above, opus.
+            (Verifies the rule is "> 0", not "== 1".)
+          * reworked-reviewer/ — rework_count: 1, role=reviewer. Resolver returns the static
+            default (Sonnet). Reviewer is NEVER escalated by this rule.
+
+
+      OUT OF SCOPE FOR STORY 2:
+        - Reviewer escalation (deferred — brief decision).
+        - Story-level tier override field (deferred).
+        - AC-complexity heuristic (deferred).
+        - Model history schema (deferred — feeds later retros work).
   - id: "3"
-    title: README documents the adapt-bmad fast path and the BMad-side Verification section convention
-    status: done
-    depends_on:
-      - "1"
-      - "2"
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "README documents adapt-bmad fast path and
-            verification convention"
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-20260513-bmad-3
-      claimed_at: 2026-05-13T13:46:59.242Z
-      completed_at: 2026-05-13T13:51:44.191Z
-      summary: README now documents adapt-bmad as the first concrete adaptor alongside universal /adopt,
-        including the BMad-side Verification section convention with a fenced-shell example; backed
-        by a new e2e mini-run and phrase-lock module.
-      rework_count: 0
-      artefacts:
-        - git:c8398d16a2491ca16d99c3539c9a5c34902ee6ad
-        - plugins/sprint-orchestrator/README.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-adapt-bmad-phrases.ts
-    notes: >
-      PROBLEM: The README documents universal /adopt and names the adaptor pattern, but doesn't yet
-      document the first concrete adaptor (adapt-bmad) or the Verification section convention that
-      BMad story authors must follow.
-
-
-      BEHAVIOUR (README.md, in the "Running a sprint" section's adaptor-pattern paragraph):
-        - Cite /sprint-orchestrator:adapt-bmad as the first concrete adaptor shipped, fitting the documented adaptor-pattern slot.
-        - Explain when to use adapt-bmad vs universal /adopt: adapt-bmad is deterministic and instant, suited for BMad-authored stories; /adopt remains the catch-all for any other source.
-        - Document the BMad-side Verification section convention with a concrete example showing the fenced shell block.
-        - Make explicit: the convention is a BMad-side authoring responsibility. The adaptor refuses cleanly when the section is missing — no silent fallback.
-
-      LOCK ASSERTION PHRASES:
-        - Mirror readme-adopt-phrases.ts and readme-runsprint-phrases.ts.
-        - New module: plugins/sprint-orchestrator/packages/mcp-server/src/tools/readme-adapt-bmad-phrases.ts.
-        - Export: ADAPT_BMAD_INTRO (string), VERIFICATION_SECTION_EXAMPLE (string, includes the fenced shell example), VERIFICATION_REQUIREMENT_STATEMENT (string).
-
-      INTEGRATION AC:
-        - New e2e mini-run runReadmeDocumentsAdaptBmadMiniRun() behind grep tag "README documents adapt-bmad fast path and verification convention".
-        - Assertions:
-            (a) "Running a sprint" section contains ADAPT_BMAD_INTRO verbatim.
-            (b) Section contains VERIFICATION_REQUIREMENT_STATEMENT verbatim.
-            (c) Section contains VERIFICATION_SECTION_EXAMPLE verbatim (the fenced shell block as a literal substring).
-            (d) Section explicitly references both adapt-bmad and the universal adopt, so a reader sees the choice.
-
-      OUT OF SCOPE:
-        - Editing other README sections.
-        - Authoring a full schema doc.
-  - id: "4"
     title: Ship gate — pnpm e2e + verify green
     status: done
     depends_on:
       - "1"
       - "2"
-      - "3"
     acceptance_criteria:
       checks:
         - type: shell
@@ -192,14 +222,14 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-20260513-bmad-4
-      claimed_at: 2026-05-13T13:52:13.575Z
+      claimed_by: dev-run-1763100003
+      claimed_at: 2026-05-13T23:32:29.613Z
       rework_count: 0
-      completed_at: 2026-05-13T13:54:24.315Z
-      summary: "Ship gate green: pnpm e2e (87/87) and pnpm verify (build, typecheck, lint, tests) both
-        pass, confirming stories 1-3 integrate cleanly."
+      completed_at: 2026-05-13T23:34:02.403Z
+      summary: "Ship gate green: pnpm e2e (97/97 assertions) and pnpm verify (build, typecheck, lint, 127
+        tests) both exit 0, proving stories 1-2 integrate cleanly with no regressions."
     notes: >
-      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-3 integrate
+      Per planning-discipline rule 3. Full unfiltered e2e + verify proves stories 1-2 integrate
       cleanly and don't regress existing assertions.
 
 
