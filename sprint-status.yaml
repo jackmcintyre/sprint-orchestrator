@@ -63,7 +63,7 @@ stories:
         the refusal fires with the structured reason.
   - id: "2"
     title: Structured failure details replace opaque "shell, shell, shell" reasons
-    status: ready
+    status: done
     depends_on:
       - "1"
     acceptance_criteria:
@@ -80,6 +80,11 @@ stories:
           expect_exit: 0
     orchestrator:
       rework_count: 0
+      branch: 2-structured-failure-details-replace-opaqu
+      completed_at: 2026-05-14T03:40:05.414Z
+      summary: Added failure_details array to schema and mark-story-failed path; captures cmd/exit_code/expected_exit/stdout/stderr/recorded_at per failed check; new e2e mini-run runStructuredFailureDetailsMiniRun. Shipped via PR #30.
+      artefacts:
+        - git:4a305fd
     notes: >
       Failed stories today persist last_failure_reason: "Acceptance criteria failed: shell, shell,
       shell" — lists check TYPES, not which command, exit code, or output. Useless for diagnosis.
