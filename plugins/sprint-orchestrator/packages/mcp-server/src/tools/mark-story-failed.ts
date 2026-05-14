@@ -3,6 +3,8 @@ import { logStateMutation } from "../lib/run-log.js";
 import { DevNotReturnedError } from "../lib/errors.js";
 import { type FailureDetail } from "../state/schema.js";
 import { type ToolContext } from "./context.js";
+import { cleanStaleBranchIfBookkeepingOnly } from "./prepare-story-branch.js";
+import { getOrInitConfig } from "./get-or-init-config.js";
 
 export type { FailureDetail };
 
@@ -43,10 +45,23 @@ export async function markStoryFailed(
   const details = failureDetails ?? [];
   const last_failure_reason = deriveFailureReason(details, reason);
 
+  // Captured inside the update callback so we can run branch cleanup after
+  // the state transition commits. We need the per-story branch + the base
+  // it was rooted from to decide whether the leftover is safe to delete.
+  let branchToClean: string = "";
+  let baseForCleanup: string = "";
+
   await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
     const story = findStory(state, storyId);
     if (!story.orchestrator.dev_returned_at) {
       throw new DevNotReturnedError(storyId);
+    }
+    const orch = story.orchestrator as Record<string, unknown>;
+    const branch = orch.branch;
+    const baseBranch = orch.base_branch;
+    if (typeof branch === "string" && branch.length > 0) {
+      branchToClean = branch;
+      baseForCleanup = typeof baseBranch === "string" && baseBranch.length > 0 ? baseBranch : "";
     }
     const orchestratorUpdate = {
       ...story.orchestrator,
@@ -69,6 +84,42 @@ export async function markStoryFailed(
     reason: last_failure_reason,
     extra: { failed_at },
   });
+
+  // B9 cleanup: after a failure, the per-story branch is dead weight. Local
+  // AND remote refs block the next attempt's prepareStoryBranch with
+  // "branch already exists". Delete bookkeeping-only leftovers proactively;
+  // leave anything with real feat/fix commits alone (a future
+  // prepareStoryBranch will raise the same refusal so a human can triage).
+  if (branchToClean) {
+    const branchName: string = branchToClean;
+    let base: string = baseForCleanup;
+    if (!base) {
+      // base_branch wasn't recorded — fall back to default_base from config.
+      const cfgRes = await getOrInitConfig(ctx);
+      base = cfgRes.config?.default_base ?? "main";
+    }
+    try {
+      // If HEAD is currently on the branch we're about to delete, `git
+      // branch -D` will refuse. Hop back to the base ref first.
+      const { spawnSync } = await import("node:child_process");
+      const head = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: ctx.projectRoot,
+        encoding: "utf8",
+      });
+      const currentBranch = (head.stdout ?? "").trim();
+      if (currentBranch === branchName) {
+        spawnSync("git", ["checkout", "--quiet", base], {
+          cwd: ctx.projectRoot,
+          encoding: "utf8",
+        });
+      }
+      cleanStaleBranchIfBookkeepingOnly(ctx.projectRoot, branchName, base);
+    } catch {
+      // Swallow — branch cleanup is best-effort; the failure transition has
+      // already committed and we don't want to corrupt the state machine on
+      // a git plumbing error.
+    }
+  }
 
   return { status: "failed", failed_at };
 }
