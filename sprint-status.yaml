@@ -244,7 +244,7 @@ stories:
         shim for gh — see the dev notes during implementation.
   - id: "5"
     title: Document recordStoryReopen as the manual-override recovery path
-    status: in_progress
+    status: done
     depends_on:
       - "1"
       - "2"
