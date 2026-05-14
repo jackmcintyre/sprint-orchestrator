@@ -1,4 +1,5 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { type ToolContext } from "./context.js";
 
 export interface MarkDevReturnedResult {
@@ -20,7 +21,7 @@ export interface MarkDevReturnedResult {
 export async function markDevReturned(
   ctx: ToolContext,
   storyId: string,
-  _agentId: string,
+  agentId: string,
 ): Promise<MarkDevReturnedResult> {
   const dev_returned_at = new Date().toISOString();
   await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
@@ -33,6 +34,13 @@ export async function markDevReturned(
       },
     };
     return { next: replaceStory(state, updated), result: undefined };
+  });
+  await logStateMutation(ctx.projectRoot, {
+    tool: "markDevReturned",
+    story_id: storyId,
+    transition: "dev_returned_at set",
+    agent_id: agentId,
+    extra: { dev_returned_at },
   });
   return { dev_returned_at };
 }

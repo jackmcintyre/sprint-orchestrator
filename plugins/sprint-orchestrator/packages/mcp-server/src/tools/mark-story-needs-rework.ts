@@ -1,6 +1,6 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
 import { ClaimConflictError, InvalidStateTransitionError } from "../lib/errors.js";
-import { commitSprintState } from "../lib/commit-state.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { type ToolContext } from "./context.js";
 
 /**
@@ -65,8 +65,14 @@ export async function markStoryNeedsRework(
     };
   });
 
-  // Persist the state mutation as its own commit; idempotent when clean.
-  await commitSprintState(ctx.projectRoot, `chore(sprint): persist ${storyId} rework`);
+  await logStateMutation(ctx.projectRoot, {
+    tool: "recordStoryRework",
+    story_id: storyId,
+    transition: "in_progress→in_progress (rework)",
+    agent_id: agentId,
+    reason,
+    extra: { rework_count: result.reworkCount, cap_reached: result.capReached },
+  });
 
   return result;
 }

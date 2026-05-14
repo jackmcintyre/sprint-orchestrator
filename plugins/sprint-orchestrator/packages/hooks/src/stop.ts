@@ -36,20 +36,10 @@ export async function handleStop(input: StopInput | null): Promise<StopOutcome> 
   }
 
   const outcome = await handleClaimed(ctx, projectRoot, inProgress);
-  // Final tidy: catch any leftover sprint-status.yaml edits (e.g. the
-  // reviewer's markStoryComplete write that landed AFTER its own commit).
-  //
-  // IMPORTANT: only tidy when this session actually transitioned a story
-  // (completed or failed). If `handleClaimed` was a noop (nothing in_progress,
-  // or ambiguous) then any dirty sprint-status.yaml is residue from a prior
-  // session — and committing it here produces a stray "chore(sprint): persist
-  // ..." commit on a branch whose current session never called an orchestrator
-  // tool. That is exactly the cross-session leak story 3 fixes.
-  let tidyCommitSha: string | null = null;
-  if (outcome.action !== "noop") {
-    tidyCommitSha = await commitMetadataOnly(projectRoot, ctx.sprintStatusPath);
-  }
-  return { ...outcome, tidyCommitSha };
+  // State no longer lives in git, so the old "final tidy commit of
+  // sprint-status.yaml" step is obsolete. Kept the field on the outcome
+  // shape for backwards-compatible consumers; always null now.
+  return { ...outcome, tidyCommitSha: null };
 }
 
 async function handleClaimed(

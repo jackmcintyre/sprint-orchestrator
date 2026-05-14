@@ -261,7 +261,7 @@ describe("validateAcceptanceCriteria", () => {
           acceptance_criteria: {
             checks: [
               { type: "shell", cmd: "echo hello" },
-              { type: "file_exists", path: "sprint-status.yaml" },
+              { type: "file_exists", path: ".sprint-orchestrator/state.yaml" },
               { type: "regex", cmd: "echo banana", pattern: "ban+ana" },
             ],
           },
@@ -484,80 +484,13 @@ function git(cwd: string, args: string[]): { stdout: string; stderr: string; sta
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status ?? 1 };
 }
 
-describe("prepareStoryBranch / default_base schema check", () => {
-  it("refuses with reason=default_base-stale when main lacks schema_version", async () => {
-    const initial = {
-      sprint_id: "stale-base-unit",
-      schema_version: 1,
-      stories: [
-        {
-          id: "A",
-          title: "Some story",
-          status: "ready",
-          depends_on: [],
-          acceptance_criteria: { checks: [] },
-          orchestrator: {},
-        },
-      ],
-    };
-    const { ctx } = await setup(initial as unknown as typeof baseSprint);
-    // Bootstrap a real git repo at projectRoot, commit current state on main,
-    // strip schema_version on main, branch off to a feature branch and put
-    // schema_version back. This mirrors the e2e fixture but stays inside the
-    // unit-test temp dir.
-    const root = ctx.projectRoot;
-    git(root, ["init", "-q", "-b", "main"]);
-    git(root, ["config", "user.email", "unit@example.com"]);
-    git(root, ["config", "user.name", "Unit Test"]);
-    git(root, ["config", "commit.gpgsign", "false"]);
-    git(root, ["add", "sprint-status.yaml"]);
-    const c1 = git(root, ["commit", "-q", "-m", "initial"]);
-    expect(c1.status).toBe(0);
+describe("prepareStoryBranch", () => {
+  // The historical "default_base-stale" schema check (which inspected
+  // `<base>:sprint-status.yaml` and refused on schema_version mismatch) was
+  // removed when state moved out of git — there is no committed state file
+  // to diverge across branches any more.
 
-    // Drop schema_version on main.
-    const fsMod = await import("node:fs");
-    const raw = fsMod.readFileSync(ctx.sprintStatusPath, "utf8");
-    fsMod.writeFileSync(ctx.sprintStatusPath, raw.replace(/^schema_version:.*\n/m, ""), "utf8");
-    git(root, ["add", "sprint-status.yaml"]);
-    git(root, ["commit", "-q", "-m", "main: drop schema_version"]);
-
-    // Feature branch with schema_version restored.
-    git(root, ["checkout", "-q", "-b", "feat/x"]);
-    fsMod.writeFileSync(ctx.sprintStatusPath, raw, "utf8");
-    git(root, ["add", "sprint-status.yaml"]);
-    git(root, ["commit", "-q", "-m", "feat: schema_version"]);
-
-    // Configure pr_per_story=true, default_base=main.
-    fsMod.mkdirSync(path.dirname(ctx.configPath), { recursive: true });
-    fsMod.writeFileSync(
-      ctx.configPath,
-      [
-        "sprintStatusPath: sprint-status.yaml",
-        "autoDetected: false",
-        'layout: "custom"',
-        "pr_per_story: true",
-        'default_base: "main"',
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
-    const branchBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
-
-    const result = await prepareStoryBranch(ctx, "A", "agent-unit");
-    expect(result.skipped).toBe(true);
-    expect(result.reason).toBe("default_base-stale");
-    expect(result.branch).toBeNull();
-    expect(result.message).toMatch(/default_base/);
-
-    const headAfter = git(root, ["rev-parse", "HEAD"]).stdout.trim();
-    const branchAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
-    expect(headAfter).toBe(headBefore);
-    expect(branchAfter).toBe(branchBefore);
-  });
-
-  it("does not run the schema check when default_base == current HEAD", async () => {
+  it("creates a per-story branch when default_base == current HEAD", async () => {
     const initial = {
       sprint_id: "head-equals-base",
       schema_version: 1,
@@ -578,7 +511,11 @@ describe("prepareStoryBranch / default_base schema check", () => {
     git(root, ["config", "user.email", "unit@example.com"]);
     git(root, ["config", "user.name", "Unit Test"]);
     git(root, ["config", "commit.gpgsign", "false"]);
-    git(root, ["add", "sprint-status.yaml"]);
+    // State lives outside git now, so seed an arbitrary tracked file to
+    // satisfy `git commit`.
+    const fsSeed = await import("node:fs");
+    fsSeed.writeFileSync(path.join(root, "README.md"), "seed\n", "utf8");
+    git(root, ["add", "README.md"]);
     git(root, ["commit", "-q", "-m", "initial"]);
 
     const fsMod = await import("node:fs");
@@ -636,7 +573,11 @@ describe("prepareStoryBranch / default_base schema check", () => {
     git(root, ["config", "user.email", "unit@example.com"]);
     git(root, ["config", "user.name", "Unit Test"]);
     git(root, ["config", "commit.gpgsign", "false"]);
-    git(root, ["add", "sprint-status.yaml"]);
+    {
+      const fsSeed = await import("node:fs");
+      fsSeed.writeFileSync(path.join(root, "README.md"), "seed\n", "utf8");
+    }
+    git(root, ["add", "README.md"]);
     git(root, ["commit", "-q", "-m", "initial"]);
 
     // Create A's branch with an extra commit so we can verify B is rooted
@@ -708,7 +649,11 @@ describe("prepareStoryBranch / default_base schema check", () => {
     git(root, ["config", "user.email", "unit@example.com"]);
     git(root, ["config", "user.name", "Unit Test"]);
     git(root, ["config", "commit.gpgsign", "false"]);
-    git(root, ["add", "sprint-status.yaml"]);
+    {
+      const fsSeed = await import("node:fs");
+      fsSeed.writeFileSync(path.join(root, "README.md"), "seed\n", "utf8");
+    }
+    git(root, ["add", "README.md"]);
     git(root, ["commit", "-q", "-m", "initial"]);
     const mainTip = git(root, ["rev-parse", "HEAD"]).stdout.trim();
 
@@ -748,7 +693,11 @@ describe("recordStoryReopen", () => {
     git(root, ["config", "user.email", "unit@example.com"]);
     git(root, ["config", "user.name", "Unit Test"]);
     git(root, ["config", "commit.gpgsign", "false"]);
-    git(root, ["add", "sprint-status.yaml"]);
+    {
+      const fsSeed = await import("node:fs");
+      fsSeed.writeFileSync(path.join(root, "README.md"), "seed\n", "utf8");
+    }
+    git(root, ["add", "README.md"]);
     git(root, ["commit", "-q", "-m", "initial"]);
     // Drive S1 through to `failed` via the real path so claimed_* and
     // last_failure_reason get populated.
@@ -782,9 +731,19 @@ describe("recordStoryReopen", () => {
     expect(history[0]!.prior_status).toBe("failed");
     expect(history[0]!.prior_failure_reason).toBe("designed-to-fail");
 
-    // Commit lands on HEAD with chore(sprint): reopen ...
-    const lastMsg = git(root, ["log", "-1", "--format=%s"]).stdout.trim();
-    expect(lastMsg).toMatch(/^chore\(sprint\): reopen S1 — human override after triage$/);
+    // State no longer rides a git commit; transition is recorded in
+    // .sprint-orchestrator/run.log instead.
+    const fsRead = await import("node:fs");
+    const logPath = path.join(root, ".sprint-orchestrator", "run.log");
+    const logText = fsRead.readFileSync(logPath, "utf8");
+    const entries = logText
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const reopen = entries.find((e) => e.tool === "recordStoryReopen" && e.story_id === "S1");
+    expect(reopen).toBeDefined();
+    expect(reopen!.transition).toBe("failed→ready");
+    expect(reopen!.reason).toBe("human override after triage");
   });
 
   it("preserves rework_count across a reopen", async () => {
@@ -794,7 +753,11 @@ describe("recordStoryReopen", () => {
     git(root, ["config", "user.email", "unit@example.com"]);
     git(root, ["config", "user.name", "Unit Test"]);
     git(root, ["config", "commit.gpgsign", "false"]);
-    git(root, ["add", "sprint-status.yaml"]);
+    {
+      const fsSeed = await import("node:fs");
+      fsSeed.writeFileSync(path.join(root, "README.md"), "seed\n", "utf8");
+    }
+    git(root, ["add", "README.md"]);
     git(root, ["commit", "-q", "-m", "initial"]);
 
     // Hand-craft a failed story with prior rework_count.

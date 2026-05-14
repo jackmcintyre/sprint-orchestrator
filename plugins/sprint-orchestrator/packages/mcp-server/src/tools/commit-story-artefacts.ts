@@ -11,9 +11,11 @@ export interface CommitResult {
  * inside `commitStoryArtefacts`. Built-in defaults so the tool stays clean
  * even in repos whose `.gitignore` is missing or incomplete:
  *
- * - `sprint-status.yaml` — orchestrator state, committed separately by
- *   markStoryComplete so reverting a code commit does not roll back the
- *   state machine.
+ * - `sprint-status.yaml` — legacy on-disk state location (the canonical
+ *   file moved to `.sprint-orchestrator/state.yaml`, which is gitignored).
+ *   Kept in the exclusion list as a belt-and-braces guard: if a stale
+ *   pre-migration copy still exists in the working tree, we will not
+ *   re-commit it.
  * - `.sprint-orchestrator/` — runtime artefacts (run.log, locks, etc.)
  *   produced by hooks; never code.
  * - `.claude/` — Claude Code's local harness state (settings.local.json,

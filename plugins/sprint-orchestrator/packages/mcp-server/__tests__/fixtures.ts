@@ -2,14 +2,15 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as YAML from "yaml";
-import { type ToolContext } from "../src/tools/context.js";
+import { STATE_FILE_RELATIVE, type ToolContext } from "../src/tools/context.js";
 
 export async function makeTempProject(initialYaml: string | object): Promise<{
   ctx: ToolContext;
   cleanup: () => Promise<void>;
 }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-"));
-  const sprintStatusPath = path.join(root, "sprint-status.yaml");
+  const sprintStatusPath = path.join(root, STATE_FILE_RELATIVE);
+  await fs.mkdir(path.dirname(sprintStatusPath), { recursive: true });
   const yaml = typeof initialYaml === "string" ? initialYaml : YAML.stringify(initialYaml);
   await fs.writeFile(sprintStatusPath, yaml, "utf8");
   const ctx: ToolContext = {

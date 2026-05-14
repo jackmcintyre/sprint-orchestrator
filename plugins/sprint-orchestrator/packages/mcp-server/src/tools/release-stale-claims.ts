@@ -1,4 +1,5 @@
 import { replaceStory, updateSprintStatus } from "../state/sprint-status.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { type ToolContext } from "./context.js";
 
 /**
@@ -12,7 +13,7 @@ export async function releaseStaleClaims(
   olderThanMinutes: number,
 ): Promise<string[]> {
   const cutoff = Date.now() - olderThanMinutes * 60_000;
-  return updateSprintStatus(ctx.sprintStatusPath, async (state) => {
+  const released = await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
     const released: string[] = [];
     let next = state;
     for (const story of state.stories) {
@@ -33,4 +34,13 @@ export async function releaseStaleClaims(
     }
     return { next, result: released };
   });
+  for (const storyId of released) {
+    await logStateMutation(ctx.projectRoot, {
+      tool: "releaseStaleClaims",
+      story_id: storyId,
+      transition: "in_progress→ready",
+      reason: `claim older than ${olderThanMinutes} min`,
+    });
+  }
+  return released;
 }

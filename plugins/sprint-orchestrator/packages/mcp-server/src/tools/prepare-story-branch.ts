@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
-import * as YAML from "yaml";
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
-import { SCHEMA_VERSION } from "../state/schema.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { getOrInitConfig } from "./get-or-init-config.js";
 import { type ToolContext } from "./context.js";
 
@@ -78,163 +77,129 @@ export async function prepareStoryBranch(
   }
   const base = cfg.default_base ?? "main";
 
-  // Refuse early if `default_base` lags behind on the orchestrator schema
-  // version. When the per-story branch is rooted at a stale base, every
-  // state commit on the new branch diffs against the OLD schema and drags
-  // along hundreds of lines of unrelated noise into the PR. Rebasing the
-  // user's `default_base` would be a destructive surprise, so we surface
-  // the mismatch and stop instead — see story 1 in the
-  // pr-per-story-1-triage backlog for the full rationale.
-  const headRef = git(ctx.projectRoot, ["rev-parse", "HEAD"]).stdout.trim();
-  const baseRef = git(ctx.projectRoot, ["rev-parse", base]).stdout.trim();
-  if (baseRef && baseRef !== headRef) {
-    const baseStatus = git(ctx.projectRoot, ["show", `${base}:sprint-status.yaml`]);
-    if (baseStatus.status === 0) {
-      let baseSchemaVersion: unknown;
-      try {
-        const parsed = YAML.parse(baseStatus.stdout) as { schema_version?: unknown } | null;
-        baseSchemaVersion = parsed?.schema_version;
-      } catch {
-        baseSchemaVersion = undefined;
-      }
-      if (baseSchemaVersion !== SCHEMA_VERSION) {
-        return {
-          branch: null,
-          skipped: true,
-          reason: "default_base-stale",
-          message:
-            `default_base '${base}' is missing orchestrator schema version ${SCHEMA_VERSION} ` +
-            `(found ${baseSchemaVersion === undefined ? "none" : String(baseSchemaVersion)}). ` +
-            `Either rebase '${base}' onto your invocation branch or set default_base in ` +
-            `.sprint-orchestrator/config.yaml.`,
-        };
-      }
-    }
-    // If `git show` failed (e.g. base does not yet have sprint-status.yaml
-    // at all), fall through to the existing behaviour — `git checkout -b`
-    // will surface any real problem with the base ref.
-  }
+  // Note: the historical `default_base-stale` schema check (which inspected
+  // `<base>:sprint-status.yaml` for a matching schema_version) was removed
+  // when state moved out of git. Without state-on-branch the rationale —
+  // avoiding per-branch schema divergence in the diff — no longer applies.
 
   // Read story (without yet acquiring write lock) to compute branch name.
   // We don't need to enforce claim ownership here — the skill only calls
   // this between claimStory and dev spawn, and a future double-call would
   // simply fail at `git checkout -b` because the branch already exists.
   // We still record `agentId` for traceability via the lock-held update below.
-  return updateSprintStatus<PrepareStoryBranchResult>(ctx.sprintStatusPath, async (state) => {
-    const story = findStory(state, storyId);
-    const branch = buildBranchName(storyId, story.title);
+  const result = await updateSprintStatus<PrepareStoryBranchResult>(
+    ctx.sprintStatusPath,
+    async (state) => {
+      const story = findStory(state, storyId);
+      const branch = buildBranchName(storyId, story.title);
 
-    // If the story has `depends_on`, prefer rooting the per-story branch at
-    // the last completed dependency's branch tip rather than `default_base`.
-    // This lets the dev subagent see its predecessor's commits — without us
-    // having to merge anything. A chain (1 -> 2 -> 3) compounds: story 3
-    // roots from story 2's tip which transitively contains story 1.
-    //
-    // We only chain when EVERY dep is done AND has a recorded
-    // `orchestrator.branch` AND that branch still exists locally. Any miss
-    // falls back to `default_base` and records the reason on the story.
-    let chosenBase: string = base;
-    let fallbackReason: string | null = null;
-    if (Array.isArray(story.depends_on) && story.depends_on.length > 0) {
-      const depMetas: Array<{
-        id: string;
-        branch: string;
-        completedAt: string | undefined;
-      }> = [];
-      let chainable = true;
-      for (const depId of story.depends_on) {
-        const dep = state.stories.find((s) => s.id === depId);
-        if (!dep) {
-          chainable = false;
-          fallbackReason = `dep ${depId} not found in sprint-status`;
-          break;
+      // If the story has `depends_on`, prefer rooting the per-story branch at
+      // the last completed dependency's branch tip rather than `default_base`.
+      // This lets the dev subagent see its predecessor's commits — without us
+      // having to merge anything. A chain (1 -> 2 -> 3) compounds: story 3
+      // roots from story 2's tip which transitively contains story 1.
+      //
+      // We only chain when EVERY dep is done AND has a recorded
+      // `orchestrator.branch` AND that branch still exists locally. Any miss
+      // falls back to `default_base` and records the reason on the story.
+      let chosenBase: string = base;
+      let fallbackReason: string | null = null;
+      if (Array.isArray(story.depends_on) && story.depends_on.length > 0) {
+        const depMetas: Array<{
+          id: string;
+          branch: string;
+          completedAt: string | undefined;
+        }> = [];
+        let chainable = true;
+        for (const depId of story.depends_on) {
+          const dep = state.stories.find((s) => s.id === depId);
+          if (!dep) {
+            chainable = false;
+            fallbackReason = `dep ${depId} not found in sprint-status`;
+            break;
+          }
+          if (dep.status !== "done") {
+            chainable = false;
+            fallbackReason = `dep ${depId} status=${dep.status} (not done)`;
+            break;
+          }
+          const depBranch = (dep.orchestrator as Record<string, unknown>).branch;
+          if (typeof depBranch !== "string" || depBranch.length === 0) {
+            chainable = false;
+            fallbackReason = `dep ${depId} has no orchestrator.branch (likely ran with pr_per_story=false)`;
+            break;
+          }
+          const exists = git(ctx.projectRoot, ["rev-parse", "--verify", "--quiet", depBranch]);
+          if (exists.status !== 0) {
+            chainable = false;
+            fallbackReason = `dep ${depId}'s branch '${depBranch}' no longer exists locally`;
+            break;
+          }
+          const completedAt = (dep.orchestrator as Record<string, unknown>).completed_at;
+          depMetas.push({
+            id: depId,
+            branch: depBranch,
+            completedAt: typeof completedAt === "string" ? completedAt : undefined,
+          });
         }
-        if (dep.status !== "done") {
-          chainable = false;
-          fallbackReason = `dep ${depId} status=${dep.status} (not done)`;
-          break;
+        if (chainable && depMetas.length > 0) {
+          // Pick the most recently completed dep as the base. Ties (or missing
+          // completed_at) fall back to insertion order, which matches the
+          // story's declared `depends_on` ordering.
+          const sorted = [...depMetas].sort((a, b) => {
+            const ax = a.completedAt ?? "";
+            const bx = b.completedAt ?? "";
+            if (ax < bx) return -1;
+            if (ax > bx) return 1;
+            return 0;
+          });
+          chosenBase = sorted[sorted.length - 1]!.branch;
         }
-        const depBranch = (dep.orchestrator as Record<string, unknown>).branch;
-        if (typeof depBranch !== "string" || depBranch.length === 0) {
-          chainable = false;
-          fallbackReason = `dep ${depId} has no orchestrator.branch (likely ran with pr_per_story=false)`;
-          break;
-        }
-        const exists = git(ctx.projectRoot, ["rev-parse", "--verify", "--quiet", depBranch]);
-        if (exists.status !== 0) {
-          chainable = false;
-          fallbackReason = `dep ${depId}'s branch '${depBranch}' no longer exists locally`;
-          break;
-        }
-        const completedAt = (dep.orchestrator as Record<string, unknown>).completed_at;
-        depMetas.push({
-          id: depId,
-          branch: depBranch,
-          completedAt: typeof completedAt === "string" ? completedAt : undefined,
-        });
       }
-      if (chainable && depMetas.length > 0) {
-        // Pick the most recently completed dep as the base. Ties (or missing
-        // completed_at) fall back to insertion order, which matches the
-        // story's declared `depends_on` ordering.
-        const sorted = [...depMetas].sort((a, b) => {
-          const ax = a.completedAt ?? "";
-          const bx = b.completedAt ?? "";
-          if (ax < bx) return -1;
-          if (ax > bx) return 1;
-          return 0;
-        });
-        chosenBase = sorted[sorted.length - 1]!.branch;
-      }
-    }
 
-    // The caller (claimStory, just before us) has already written the new
-    // claim into sprint-status.yaml. That uncommitted change can block a
-    // plain `git checkout -b <branch> <base>` if base has a divergent copy
-    // of the file (e.g. base=main while we're on a prior story branch that
-    // committed sprint-status forward). We resolve this by reverting the
-    // tracked sprint-status.yaml to the current branch's HEAD before the
-    // checkout — the in-memory `next` state (with the new claim) will be
-    // re-written to disk by updateSprintStatus once this mutator returns,
-    // so no information is lost; it just lands on the per-story branch
-    // instead of being a stray uncommitted hunk on the source branch.
-    const dirty = git(ctx.projectRoot, ["status", "--porcelain", "sprint-status.yaml"]);
-    if (dirty.stdout.trim().length > 0) {
-      const restore = git(ctx.projectRoot, ["checkout", "--", "sprint-status.yaml"]);
-      if (restore.status !== 0) {
+      // State no longer lives in git, so the historical sprint-status.yaml
+      // revert-before-checkout dance is gone. The state file is in
+      // `.sprint-orchestrator/state.yaml`, which `.gitignore` excludes; the
+      // checkout is free of orchestrator interference.
+
+      const checkout = git(ctx.projectRoot, ["checkout", "-b", branch, chosenBase]);
+      if (checkout.status !== 0) {
         throw new Error(
-          `prepareStoryBranch: failed to revert sprint-status.yaml before checkout: ${restore.stderr.trim()}`,
+          `prepareStoryBranch: git checkout -b ${branch} ${chosenBase} failed: ${checkout.stderr.trim()}`,
         );
       }
-    }
 
-    const checkout = git(ctx.projectRoot, ["checkout", "-b", branch, chosenBase]);
-    if (checkout.status !== 0) {
-      throw new Error(
-        `prepareStoryBranch: git checkout -b ${branch} ${chosenBase} failed: ${checkout.stderr.trim()}`,
-      );
-    }
-
-    const updatedOrch: typeof story.orchestrator = {
-      ...story.orchestrator,
-      branch,
-      branch_prepared_by: agentId,
-      branch_prepared_at: new Date().toISOString(),
-      base_branch: chosenBase,
-    };
-    if (fallbackReason) {
-      (updatedOrch as Record<string, unknown>).base_branch_fallback_reason = fallbackReason;
-    } else {
-      // Clear any stale reason from a prior attempt.
-      delete (updatedOrch as Record<string, unknown>).base_branch_fallback_reason;
-    }
-    const updated = {
-      ...story,
-      orchestrator: updatedOrch,
-    };
-    return {
-      next: replaceStory(state, updated),
-      result: { branch, skipped: false },
-    };
-  });
+      const updatedOrch: typeof story.orchestrator = {
+        ...story.orchestrator,
+        branch,
+        branch_prepared_by: agentId,
+        branch_prepared_at: new Date().toISOString(),
+        base_branch: chosenBase,
+      };
+      if (fallbackReason) {
+        (updatedOrch as Record<string, unknown>).base_branch_fallback_reason = fallbackReason;
+      } else {
+        // Clear any stale reason from a prior attempt.
+        delete (updatedOrch as Record<string, unknown>).base_branch_fallback_reason;
+      }
+      const updated = {
+        ...story,
+        orchestrator: updatedOrch,
+      };
+      return {
+        next: replaceStory(state, updated),
+        result: { branch, skipped: false },
+      };
+    },
+  );
+  if (result.branch) {
+    await logStateMutation(ctx.projectRoot, {
+      tool: "prepareStoryBranch",
+      story_id: storyId,
+      transition: "branch prepared",
+      agent_id: agentId,
+      extra: { branch: result.branch },
+    });
+  }
+  return result;
 }

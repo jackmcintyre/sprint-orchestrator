@@ -3,6 +3,7 @@ import * as YAML from "yaml";
 
 import { type ToolContext } from "./context.js";
 import { writeConfig, type OrchestratorConfig } from "./get-or-init-config.js";
+import { appendRunLog } from "../lib/run-log.js";
 
 export interface SetConfigPrPerStoryResult {
   ok: boolean;
@@ -37,6 +38,12 @@ export async function setConfigPrPerStory(
 
   const updated = { ...existing, pr_per_story: value };
   await writeConfig(ctx.configPath, updated);
+  await appendRunLog(ctx.projectRoot, {
+    event: "config_mutation",
+    at: new Date().toISOString(),
+    tool: "setConfigPrPerStory",
+    pr_per_story: value,
+  });
   return { ok: true, pr_per_story: value };
 }
 

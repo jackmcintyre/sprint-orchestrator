@@ -1,5 +1,5 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
-import { commitSprintState } from "../lib/commit-state.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { DevNotReturnedError } from "../lib/errors.js";
 import { type FailureDetail } from "../state/schema.js";
 import { type ToolContext } from "./context.js";
@@ -62,8 +62,13 @@ export async function markStoryFailed(
     return { next: replaceStory(state, updated), result: undefined };
   });
 
-  // Persist the state mutation as its own commit; idempotent when clean.
-  await commitSprintState(ctx.projectRoot, `chore(sprint): persist ${storyId} failure`);
+  await logStateMutation(ctx.projectRoot, {
+    tool: "recordStoryFailure",
+    story_id: storyId,
+    transition: "in_progress→failed",
+    reason: last_failure_reason,
+    extra: { failed_at },
+  });
 
   return { status: "failed", failed_at };
 }

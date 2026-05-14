@@ -1,6 +1,6 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
 import { InvalidStateTransitionError } from "../lib/errors.js";
-import { commitSprintState } from "../lib/commit-state.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { type ToolContext } from "./context.js";
 
 export interface RecordStoryReopenResult {
@@ -76,7 +76,14 @@ export async function recordStoryReopen(
     };
   });
 
-  await commitSprintState(ctx.projectRoot, `chore(sprint): reopen ${storyId} — ${reason}`);
+  await logStateMutation(ctx.projectRoot, {
+    tool: "recordStoryReopen",
+    story_id: storyId,
+    transition: "failed→ready",
+    agent_id: reopenedByAgentId,
+    reason,
+    extra: { reopened_at, rework_count: result.reworkCount },
+  });
 
   return { status: "ready", reopened_at, reworkCount: result.reworkCount };
 }

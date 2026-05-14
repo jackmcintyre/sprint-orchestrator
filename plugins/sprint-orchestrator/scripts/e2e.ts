@@ -35,6 +35,8 @@ import { lintSprint } from "../packages/mcp-server/src/tools/lint-sprint.js";
 import { validateAndWriteBacklog } from "../packages/mcp-server/src/tools/adopt-write.js";
 import { adaptBmadOutput } from "../packages/mcp-server/src/tools/adapt-bmad.js";
 import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.js";
+// Kept for the deprecated stale-mini-run function bodies; not referenced
+// by any active assertion in this file.
 import { UNCOMMITTED_BACKLOG_REFUSAL } from "../packages/mcp-server/src/tools/run-sprint-preflight-phrases.js";
 import {
   CLIPBOARD_AUTOCOPY_NOTE_LINE,
@@ -205,7 +207,10 @@ async function getReadyStoriesViaDist(ctx: ToolContext): Promise<{ id: string }[
 function makeContext(root: string): ToolContext {
   return {
     projectRoot: root,
-    sprintStatusPath: path.join(root, "sprint-status.yaml"),
+    // Canonical state file is the new out-of-git location. The tools' built-in
+    // migration helper copies legacy `<root>/sprint-status.yaml` content
+    // across on the first read, so existing fixtures keep working unchanged.
+    sprintStatusPath: path.join(root, ".sprint-orchestrator", "state.yaml"),
     configPath: path.join(root, ".sprint-orchestrator", "config.yaml"),
   };
 }
@@ -502,25 +507,54 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
 
   return [
     {
-      name: "two commits per happy-path story (code + state)",
+      name: "one commit per happy-path story (code only; state no longer rides git)",
       run: () => {
+        const newCount = happy.shasAfter.length - happy.shasBefore.length;
         expect(
-          happy.shasAfter.length - happy.shasBefore.length === 2,
-          `expected 2 new commits for story A, got ${
-            happy.shasAfter.length - happy.shasBefore.length
-          } (messages: ${JSON.stringify(happy.commitMessages)})`,
+          newCount === 1,
+          `expected exactly 1 new commit for story A (state lives in .sprint-orchestrator/state.yaml, not git), got ${newCount} (messages: ${JSON.stringify(happy.commitMessages)})`,
         );
-        // Exactly one of the two commits must touch sprint-status.yaml; the other
-        // must not. This guards against the regression where both files land in
-        // the same commit (or sprint-status never gets committed).
-        const touches = happy.filesInLastTwoCommits.map((files) =>
-          files.includes("sprint-status.yaml"),
-        );
-        const yamlCommits = touches.filter(Boolean).length;
+        // No commit must touch sprint-status.yaml or the new state file.
+        for (const files of happy.filesInLastTwoCommits) {
+          for (const f of files) {
+            expect(
+              f !== "sprint-status.yaml" && !f.startsWith(".sprint-orchestrator/"),
+              `commit touched orchestrator state file ${f}; state must never land in git commits`,
+            );
+          }
+        }
+      },
+    },
+    {
+      name: "state file lives outside git",
+      run: () => {
+        // The canonical state file must exist at .sprint-orchestrator/state.yaml
+        // AND it must be ignored by git (no entry in the working tree status,
+        // nor in any commit on HEAD).
+        const stateRel = ".sprint-orchestrator/state.yaml";
+        const stateAbs = path.join(ctx.projectRoot, stateRel);
+        expect(existsSync(stateAbs), `expected state file at ${stateRel} to exist`);
+        // git status: state file must NOT appear (gitignored).
+        const status = git(ctx.projectRoot, [
+          "status",
+          "--porcelain",
+          "--ignored=no",
+          "--",
+          stateRel,
+        ]);
         expect(
-          yamlCommits === 1,
-          `expected exactly 1 of the 2 new commits to touch sprint-status.yaml, got ${yamlCommits}`,
+          status.stdout.trim().length === 0,
+          `expected ${stateRel} to be invisible to git status, got: ${status.stdout}`,
         );
+        // git log: no commit on HEAD touches it.
+        const logHits = git(ctx.projectRoot, [
+          "log",
+          "--all",
+          "--oneline",
+          "--",
+          stateRel,
+        ]).stdout.trim();
+        expect(logHits.length === 0, `expected no commits touching ${stateRel}, got: ${logHits}`);
       },
     },
     {
@@ -780,7 +814,7 @@ async function runOptOutMiniRun(): Promise<AssertionOutcome[]> {
             .split("\n")
             .filter(Boolean);
           const newShas = happy.shasAfter.filter((s) => !happy.shasBefore.includes(s));
-          expect(newShas.length === 2, `expected 2 new commits, got ${newShas.length}`);
+          expect(newShas.length === 1, `expected 1 new commit (code only), got ${newShas.length}`);
           for (const sha of newShas) {
             expect(
               branchCommits.includes(sha),
@@ -815,13 +849,12 @@ async function runOptOutMiniRun(): Promise<AssertionOutcome[]> {
 }
 
 /**
- * Mini-run: spin up a temp repo whose `main` branch's sprint-status.yaml is
- * missing the current `schema_version`, advance the invocation branch with a
- * schema-shaped change, and drive one story with `pr_per_story=true`. Asserts
- * that `prepareStoryBranch` refuses with `reason="default_base-stale"` and
- * does NOT move HEAD off the invocation branch. Guards against the
- * 200+-line-chore-commit regression captured on slice 1.1.
+ * @deprecated The `default_base-stale` refusal was removed when
+ * orchestrator state moved out of git (story 1 of the
+ * orchestrator-state-and-shipgate sprint). Function retained briefly so
+ * the diff stays focused on the design pivot; remove in a follow-up.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function runStaleBaseMiniRun(): Promise<AssertionOutcome[]> {
   const root = await setupTempRepo();
   const ctx = makeContext(root);
@@ -964,10 +997,15 @@ async function runCrossSessionStrayCommitMiniRun(): Promise<AssertionOutcome[]> 
   const commitsBefore = git(root, ["rev-list", "HEAD"]).stdout.trim().split("\n").filter(Boolean);
 
   // Simulate residue from a prior session: append a harmless-but-real edit to
-  // sprint-status.yaml without going through any orchestrator tool. Use an
-  // appended YAML comment so the file still parses (handleStop reads it).
-  const original = await fs.readFile(sprintPath, "utf8");
-  await fs.writeFile(sprintPath, `${original}# stray edit from a prior session\n`, "utf8");
+  // the legacy `sprint-status.yaml` (the fixture writes there) without going
+  // through any orchestrator tool. handleStop reads via readSprintStatus,
+  // which auto-migrates legacy on first call.
+  const legacyPath = path.join(root, "sprint-status.yaml");
+  const original = await fs.readFile(legacyPath, "utf8");
+  await fs.writeFile(legacyPath, `${original}# stray edit from a prior session\n`, "utf8");
+  // Reference sprintPath to avoid an unused-variable warning when the
+  // ctx-based path is not directly read in this mini-run.
+  void sprintPath;
 
   // CRUCIAL: do NOT call any MCP orchestrator tool in this "session". Just
   // fire the Stop hook directly, as the Claude Code harness would when the
@@ -1481,18 +1519,11 @@ async function runRecordStoryReopenMiniRun(): Promise<AssertionOutcome[]> {
             readyIds.includes("C"),
             `expected C in ready set after reopen, got [${readyIds.join(", ")}]`,
           );
-          // Chore commit on HEAD.
+          // State no longer rides a git commit. The reopen audit lives in
+          // .sprint-orchestrator/run.log; HEAD must NOT have advanced.
           expect(
-            headAfter !== headBefore,
-            `expected a new commit after reopen, HEAD unchanged at ${headAfter}`,
-          );
-          expect(
-            /^chore\(sprint\): reopen C — /.test(lastMsg),
-            `expected HEAD message to match "chore(sprint): reopen C — ...", got: ${lastMsg}`,
-          );
-          expect(
-            lastMsg.includes(reopenReason),
-            `expected HEAD message to carry the reason, got: ${lastMsg}`,
+            headAfter === headBefore,
+            `expected HEAD unchanged after reopen (state lives outside git), got ${headBefore}→${headAfter}; last commit msg: ${lastMsg}`,
           );
         },
       },
@@ -2007,20 +2038,16 @@ async function runRunSprintWrapperMiniRun(): Promise<AssertionOutcome[]> {
 }
 
 /**
- * Mini-run for orchestrator-hardening-followup story 3: run-sprint
- * refuses to launch when sprint-status.yaml has uncommitted changes in
- * the current git repo. Sets up a temp git repo, writes a sprint-status
- * file WITHOUT committing, calls the planner, and asserts the
- * phrase-locked refusal fires.
- *
- * Also covers the negative path: once the file is committed, the same
- * planner call proceeds normally and returns `kind: "ok"`.
- *
- * The phrase-locked refusal text is asserted verbatim against
- * `UNCOMMITTED_BACKLOG_REFUSAL` so the planner, skill, and harness can
- * never drift.
+ * @deprecated Removed when orchestrator state moved out of git (story 1
+ * of orchestrator-state-and-shipgate). Function retained as an empty
+ * stub so the diff stays focused; remove in a follow-up.
  */
-async function runRunSprintUncommittedBacklogMiniRun(): Promise<AssertionOutcome[]> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function runRunSprintUncommittedBacklogMiniRun_unused(): Promise<AssertionOutcome[]> {
+  return [];
+}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _runRunSprintUncommittedBacklogMiniRun_OLD(): Promise<AssertionOutcome[]> {
   const outcomes: AssertionOutcome[] = [];
 
   async function writeSprint(root: string) {
@@ -2183,6 +2210,121 @@ async function runRunSprintUncommittedBacklogMiniRun(): Promise<AssertionOutcome
     await fs.rm(tmp3, { recursive: true, force: true });
   }
 
+  return outcomes;
+}
+
+/**
+ * Mini-run for orchestrator-state-and-shipgate story 1: the legacy
+ * `sprint-status.yaml` is automatically migrated into the new
+ * out-of-git location `.sprint-orchestrator/state.yaml` on the first
+ * read. Asserts that:
+ *   - the new state file is created with the same content
+ *   - tools driven against the new location work end-to-end
+ *   - the new state file is NOT tracked by git (gitignored)
+ */
+async function runLegacyStateMigrationMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-migrate-"));
+  try {
+    // Bootstrap a git repo, write legacy sprint-status.yaml at root, commit it
+    // (real-world projects almost always shipped this file in git pre-migration).
+    const gitInit = git(root, ["init", "-q", "-b", "main"]);
+    if (gitInit.status !== 0) throw new Error(`git init failed: ${gitInit.stderr}`);
+    git(root, ["config", "user.email", "e2e@example.com"]);
+    git(root, ["config", "user.name", "E2E Harness"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+    // Honor the plugin's .gitignore so the new state file stays untracked.
+    await fs.writeFile(
+      path.join(root, ".gitignore"),
+      ".sprint-orchestrator/state.*\n.sprint-orchestrator/run.log\n",
+      "utf8",
+    );
+    const legacyPath = path.join(root, "sprint-status.yaml");
+    const legacyYaml = [
+      "schema_version: 1",
+      'sprint_id: "migrate-fixture"',
+      "stories:",
+      '  - id: "M1"',
+      '    title: "migrated story"',
+      "    status: ready",
+      "    depends_on: []",
+      "    acceptance_criteria:",
+      "      checks: []",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    await fs.writeFile(legacyPath, legacyYaml, "utf8");
+    git(root, ["add", "-A"]);
+    git(root, ["commit", "-q", "-m", "initial fixture (legacy sprint-status.yaml)"]);
+
+    // Build a ToolContext pointing at the new state location and let the
+    // tools auto-migrate.
+    const ctx: ToolContext = {
+      projectRoot: root,
+      sprintStatusPath: path.join(root, ".sprint-orchestrator", "state.yaml"),
+      configPath: path.join(root, ".sprint-orchestrator", "config.yaml"),
+    };
+    const state = await readSprintStatus(ctx.sprintStatusPath);
+
+    const a: Assertion = {
+      name: "migration from sprint-status.yaml to .sprint-orchestrator/state",
+      run: () => {
+        // 1. New state file exists, with the migrated story.
+        const newExists = existsSync(ctx.sprintStatusPath);
+        expect(newExists, `expected new state file at ${ctx.sprintStatusPath}`);
+        expect(
+          state.stories.length === 1,
+          `expected 1 story migrated, got ${state.stories.length}`,
+        );
+        expect(state.stories[0]!.id === "M1", `expected story M1, got ${state.stories[0]!.id}`);
+        expect(
+          state.sprint_id === "migrate-fixture",
+          `expected sprint_id=migrate-fixture, got ${state.sprint_id}`,
+        );
+        // 2. New state file is invisible to git status (gitignored).
+        const status = git(root, [
+          "status",
+          "--porcelain",
+          "--",
+          ".sprint-orchestrator/state.yaml",
+        ]);
+        expect(
+          status.stdout.trim().length === 0,
+          `expected .sprint-orchestrator/state.yaml to be invisible to git status, got: ${status.stdout}`,
+        );
+        // 3. A subsequent write through claimStory + markDevReturned lands on
+        //    the new location and produces NO git commits.
+        const headBefore = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+        // The function passed to .run() must be sync per Assertion contract,
+        // so we only assert head-unchanged after the awaited drive below.
+        expect(typeof headBefore === "string" && headBefore.length > 0, "HEAD missing");
+      },
+    };
+
+    try {
+      await a.run();
+      // Drive one claim+return outside the assertion fn (which is sync).
+      const claim = await claimStory(ctx, "M1", "agent-migrate");
+      if (!claim.claimed) throw new Error(`could not claim M1: holder=${claim.holder ?? "?"}`);
+      await markDevReturned(ctx, "M1", "agent-migrate");
+
+      const headBefore = git(root, ["log", "--oneline"]).stdout.trim().split("\n").length;
+      const status = git(root, ["status", "--porcelain"]);
+      // No new commits, no tracked-file dirt.
+      const noStateInStatus = !status.stdout.includes(".sprint-orchestrator/state.yaml");
+      expect(noStateInStatus, `state file appeared in git status: ${status.stdout}`);
+      expect(headBefore === 1, `expected exactly 1 commit on HEAD, got ${headBefore}`);
+
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
   return outcomes;
 }
 
@@ -3570,12 +3712,9 @@ async function main(): Promise<number> {
     outcomes.push(...optOutOutcomes);
   }
 
-  // Third mini-run: exercise the stale-default_base refusal path.
-  if (!filter || filter.test("refuses when default_base lacks orchestrator schema")) {
-    console.log("[e2e] mini-run: default_base-stale refusal");
-    const staleOutcomes = await runStaleBaseMiniRun();
-    outcomes.push(...staleOutcomes);
-  }
+  // Third mini-run (REMOVED): the default_base-stale refusal path is gone
+  // now that orchestrator state lives outside git. See story 1 of the
+  // orchestrator-state-and-shipgate sprint.
 
   // Fourth mini-run: exercise the cross-session stray-commit guard (story 3).
   if (
@@ -3664,21 +3803,18 @@ async function main(): Promise<number> {
     outcomes.push(...runSprintOutcomes);
   }
 
-  // orchestrator-hardening-followup sprint, story 3: run-sprint refuses
-  // to launch when sprint-status.yaml has uncommitted changes. Guards
-  // the 2026-05-14 retro lesson where PR #29 merging to main overwrote
-  // an uncommitted live backlog.
-  if (
-    !filter ||
-    filter.test("run-sprint refuses when sprint-status.yaml has uncommitted changes") ||
-    filter.test(
-      "run-sprint refuses when committed sprint-status.yaml has unstaged modifications",
-    ) ||
-    filter.test("run-sprint preflight passes when sprint-status.yaml is fully committed")
-  ) {
-    console.log("[e2e] mini-run: run-sprint uncommitted-backlog preflight refusal");
-    const uncommittedOutcomes = await runRunSprintUncommittedBacklogMiniRun();
-    outcomes.push(...uncommittedOutcomes);
+  // (REMOVED) The uncommitted-backlog preflight is obsolete now that
+  // orchestrator state lives in `.sprint-orchestrator/state.yaml` (out of
+  // git). See story 1 of the orchestrator-state-and-shipgate sprint.
+
+  // New mini-run: migration from legacy `sprint-status.yaml` to the new
+  // out-of-git `.sprint-orchestrator/state.yaml`. Drops a fresh fixture in
+  // a temp repo without the new state file, calls a read, and asserts the
+  // migration moved data across without dirtying the working tree.
+  if (!filter || filter.test("migration from sprint-status.yaml to .sprint-orchestrator/state")) {
+    console.log("[e2e] mini-run: legacy sprint-status.yaml → .sprint-orchestrator/state.yaml");
+    const migrationOutcomes = await runLegacyStateMigrationMiniRun();
+    outcomes.push(...migrationOutcomes);
   }
 
   // goal-adoption sprint, story 1: run-sprint locks the /goal command as the

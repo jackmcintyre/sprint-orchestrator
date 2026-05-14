@@ -1,4 +1,5 @@
 import { findStory, replaceStory, updateSprintStatus } from "../state/sprint-status.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { type ToolContext } from "./context.js";
 
 export interface ClaimResult {
@@ -17,11 +18,11 @@ export async function claimStory(
   storyId: string,
   agentId: string,
 ): Promise<ClaimResult> {
-  return updateSprintStatus<ClaimResult>(ctx.sprintStatusPath, async (state) => {
+  const result = await updateSprintStatus<ClaimResult>(ctx.sprintStatusPath, async (state) => {
     const story = findStory(state, storyId);
     if (story.status !== "ready") {
-      const result: ClaimResult = { claimed: false, holder: story.orchestrator.claimed_by };
-      return { next: state, result };
+      const inner: ClaimResult = { claimed: false, holder: story.orchestrator.claimed_by };
+      return { next: state, result: inner };
     }
     const updated = {
       ...story,
@@ -32,7 +33,16 @@ export async function claimStory(
         claimed_at: new Date().toISOString(),
       },
     };
-    const result: ClaimResult = { claimed: true };
-    return { next: replaceStory(state, updated), result };
+    const inner: ClaimResult = { claimed: true };
+    return { next: replaceStory(state, updated), result: inner };
   });
+  if (result.claimed) {
+    await logStateMutation(ctx.projectRoot, {
+      tool: "claimStory",
+      story_id: storyId,
+      transition: "ready→in_progress",
+      agent_id: agentId,
+    });
+  }
+  return result;
 }

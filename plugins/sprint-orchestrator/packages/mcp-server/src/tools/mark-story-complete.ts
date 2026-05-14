@@ -5,7 +5,7 @@ import {
   ClaimConflictError,
   InvalidStateTransitionError,
 } from "../lib/errors.js";
-import { commitSprintState } from "../lib/commit-state.js";
+import { logStateMutation } from "../lib/run-log.js";
 import { runChecks } from "../validators/acceptance.js";
 import { getOrInitConfig } from "./get-or-init-config.js";
 import { type ToolContext } from "./context.js";
@@ -154,11 +154,15 @@ export async function markStoryComplete(
     return { next: replaceStory(state, updated), result: undefined };
   });
 
-  // Persist the state mutation as its own `git commit` (touching ONLY
-  // sprint-status.yaml) so reverting a code commit does not roll back the
-  // orchestrator state machine. Idempotent: no-op when sprint-status.yaml is
-  // already clean (e.g. updateSprintStatus produced no textual diff).
-  await commitSprintState(ctx.projectRoot, `chore(sprint): persist ${storyId} completion`);
+  // The canonical state file lives outside git (.sprint-orchestrator/state.yaml)
+  // so we no longer commit state mutations. Audit trail moves to run.log.
+  await logStateMutation(ctx.projectRoot, {
+    tool: "recordStorySuccess",
+    story_id: storyId,
+    transition: "in_progress→done",
+    agent_id: agentId,
+    extra: { completed_at },
+  });
 
   return { status: "done", completed_at };
 }

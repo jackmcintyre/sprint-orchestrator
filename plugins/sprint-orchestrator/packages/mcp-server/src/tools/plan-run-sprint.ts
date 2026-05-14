@@ -1,12 +1,11 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as YAML from "yaml";
 
 import { DEFAULT_TURN_CAP_PER_STORY, type OrchestratorConfig } from "./get-or-init-config.js";
-import { UNCOMMITTED_BACKLOG_REFUSAL } from "./run-sprint-preflight-phrases.js";
 import { readSprintStatus } from "../state/sprint-status.js";
 import { StateNotFoundError } from "../lib/errors.js";
+import { STATE_FILE_RELATIVE } from "./context.js";
 
 /**
  * Pure planner for the `run-sprint` wrapper skill.
@@ -41,48 +40,21 @@ export type PlanRunSprintResult =
   | {
       kind: "refuse";
       /** Why the wrapper refuses. Surfaced verbatim to the user. */
-      reason: "missing_backlog" | "drained" | "uncommitted_backlog";
+      reason: "missing_backlog" | "drained";
       message: string;
     };
 
 /**
- * Preflight: is the cwd inside a git repo, and if so, does
- * `sprint-status.yaml` have uncommitted changes (untracked, modified, or
- * staged)? Returns the verbatim refusal message when the backlog is
- * dirty; returns `null` when it's clean, untracked-outside-a-git-repo,
- * or git is unavailable (the preflight is best-effort — we don't want to
- * brick the wrapper on systems without git).
+ * Historical helper kept as a no-op for backwards compatibility with any
+ * out-of-tree callers. The uncommitted-backlog preflight is obsolete now
+ * that orchestrator state lives outside git (see story 1 of the
+ * orchestrator-state-and-shipgate sprint), so this always returns `null`.
  *
- * Implementation: `git status --porcelain -- <sprintStatusPath>` printing
- * any line means the file is dirty in some way the user must commit
- * before launching. Anything else (no git, no repo, clean tree) is a pass.
+ * @deprecated state no longer lives in git; safe to delete in the next
+ *   major bump.
  */
-export function checkUncommittedBacklog(cwd: string): string | null {
-  const sprintStatusPath = path.join(cwd, "sprint-status.yaml");
-
-  // Fast path: only run git if the file actually exists. The
-  // missing-backlog refusal handles the not-there case separately.
-  if (!existsSync(sprintStatusPath)) return null;
-
-  // First confirm we're inside a git repo — outside one, "uncommitted"
-  // is meaningless and we should let the rest of the planner proceed.
-  const inside = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-    cwd,
-    encoding: "utf8",
-  });
-  if (inside.status !== 0) return null;
-  if ((inside.stdout ?? "").trim() !== "true") return null;
-
-  const r = spawnSync("git", ["status", "--porcelain", "--", "sprint-status.yaml"], {
-    cwd,
-    encoding: "utf8",
-  });
-  if (r.status !== 0) return null; // git error → best-effort pass
-
-  const output = (r.stdout ?? "").trim();
-  if (output.length === 0) return null;
-
-  return UNCOMMITTED_BACKLOG_REFUSAL;
+export function checkUncommittedBacklog(_cwd: string): string | null {
+  return null;
 }
 
 /**
@@ -112,35 +84,27 @@ async function readTurnCapPerStory(cwd: string): Promise<number> {
 }
 
 export async function planRunSprint(input: PlanRunSprintInput): Promise<PlanRunSprintResult> {
-  const sprintStatusPath = path.join(input.cwd, "sprint-status.yaml");
+  const statePath = path.join(input.cwd, STATE_FILE_RELATIVE);
 
   let sprint;
   try {
-    sprint = await readSprintStatus(sprintStatusPath);
+    sprint = await readSprintStatus(statePath);
   } catch (err) {
     if (err instanceof StateNotFoundError) {
       return {
         kind: "refuse",
         reason: "missing_backlog",
         message:
-          `no backlog found: expected sprint-status.yaml at ${sprintStatusPath}. ` +
+          `no backlog found: expected sprint-status.yaml at ${path.join(input.cwd, "sprint-status.yaml")}. ` +
           `Copy a backlog file there before running.`,
       };
     }
     throw err;
   }
 
-  // Preflight: refuse to launch if sprint-status.yaml is dirty in git.
-  // A story PR merging to main mid-run would otherwise overwrite the
-  // live backlog and force manual recovery from a dangling git blob.
-  const uncommittedRefusal = checkUncommittedBacklog(input.cwd);
-  if (uncommittedRefusal !== null) {
-    return {
-      kind: "refuse",
-      reason: "uncommitted_backlog",
-      message: uncommittedRefusal,
-    };
-  }
+  // The historical uncommitted-backlog preflight is gone: state now lives
+  // in `.sprint-orchestrator/state.yaml` (gitignored), so there is no
+  // committed backlog to be dirty in the first place.
 
   const stories = sprint.stories;
   const total = stories.length;

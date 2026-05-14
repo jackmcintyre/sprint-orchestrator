@@ -155,8 +155,15 @@ async function detectBmadV6(projectRoot: string): Promise<OrchestratorConfig | n
     storiesDir: "docs/stories",
   };
 
-  const sprintStatusExists = await pathExists(path.join(projectRoot, candidates.sprintStatusPath));
-  if (!sprintStatusExists) return null;
+  // Accept either the legacy in-git `sprint-status.yaml` (pre-migration
+  // checkouts) or the new out-of-git `.sprint-orchestrator/state.yaml`
+  // (post-migration / fresh adopt). Either signals an orchestrator-managed
+  // project.
+  const legacyExists = await pathExists(path.join(projectRoot, candidates.sprintStatusPath));
+  const stateExists = await pathExists(
+    path.join(projectRoot, ".sprint-orchestrator", "state.yaml"),
+  );
+  if (!legacyExists && !stateExists) return null;
 
   const config: OrchestratorConfig = {
     sprintStatusPath: candidates.sprintStatusPath,
