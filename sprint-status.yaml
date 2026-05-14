@@ -173,7 +173,7 @@ stories:
       Open question for Jack: is the repo URL public? The clone command needs that confirmation.
   - id: "5"
     title: First-run pr_per_story setup prompt
-    status: in_progress
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -202,9 +202,19 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      rework_count: 0
       claimed_by: dev-1747268400-s5
       claimed_at: 2026-05-14T01:29:12.512Z
+      rework_count: 0
+      completed_at: 2026-05-14T01:35:12.146Z
+      summary: "Implemented first-run pr_per_story setup prompt: phrase-lock module, setConfigPrPerStory
+        MCP tool, getOrInitConfig surfacing the setup question, SKILL.md documentation, and e2e
+        mini-run with 3 fixtures all passing."
+      artefacts:
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/pr-per-story-setup-phrases.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/set-config-pr-per-story.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/index.ts
+        - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
+        - git:5a8024eaf48b8dc328ce8ddd730dd006f074c57f
     notes: >
       Make pr_per_story a deliberate choice at first-run, not a silent default inheriting Jack's
       solo-dog-fooding posture. New phrase-lock module PR_PER_STORY_SETUP_PROMPT in
