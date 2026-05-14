@@ -73,59 +73,69 @@ Then in Claude Code:
 
 ## 2. Use it on your own project
 
-### If you use BMad for planning
+### Step 1 — import your backlog
 
-Run the fast-path adaptor. It converts your BMad story files into a conforming
-`sprint-status.yaml` deterministically — no LLM step, no review prompt:
+Use `/sprint-orchestrator:adopt` or `/sprint-orchestrator:adapt-bmad` to create
+`sprint-status.yaml` from your planning artifacts (see **Running a sprint** below).
+You can also write `sprint-status.yaml` by hand — copy
+[`examples/hello-sprint/sprint-status.yaml`](../../examples/hello-sprint/sprint-status.yaml)
+as your starting template.
+
+## Running a sprint
+
+### 1. Import your backlog
+
+The orchestrator understands the **adaptor pattern**. The orchestrator core does not import adaptors; adaptors depend on the schema, not the other way round. BMad is one example; the pattern works for any producer that can emit a conforming backlog. No adaptors ship in this sprint; the pattern is documented for future extension.
+
+**If you use BMad for planning** — use the adapt-bmad fast path:
+
+`/sprint-orchestrator:adapt-bmad` is the first concrete adaptor shipped under this pattern: a deterministic, instant fast path for BMad-authored stories. Reach for it when your stories were authored by BMad; reach for universal `/sprint-orchestrator:adopt` for any other source.
 
 ```
 /sprint-orchestrator:adapt-bmad
 ```
 
-Every BMad story file must include a `## Verification` section with at least one fenced
-`shell` block. When the section is missing or empty, `adapt-bmad` refuses the run with a
-named error — there is no silent fallback. A minimal Verification section looks like this:
+The convention is a BMad-side authoring responsibility: every BMad story file must include a `## Verification` section containing at least one fenced `shell` block. When the section is missing or empty, `adapt-bmad` refuses the run with a named error — there is no silent fallback.
+
+A minimal Verification section looks like this:
 
 ```shell
 pnpm --dir plugins/sprint-orchestrator test -- story-one
 ```
 
-`adapt-bmad` extracts the fenced shell command(s) into `acceptance_criteria.checks` and
-writes a conforming `sprint-status.yaml`.
-
-### If you don't use BMad
-
-Use the universal adopt skill. It accepts any external planning context (an epic doc, a
-brief, a stack of story files, meeting notes) and drafts a conforming backlog for your
-review:
+**If you don't use BMad** — use the universal `/sprint-orchestrator:adopt` skill:
 
 ```
 /sprint-orchestrator:adopt <path>
 ```
 
-The flow: source → LLM subagent drafts → you review (accept / edit / abort) → on accept,
-`lintSprint` validates → write to `sprint-status.yaml`. The skill never writes without
-your acceptance, and never writes a draft that doesn't pass `lintSprint`.
+It accepts any external planning context (an epic doc, a brief, a stack of story files,
+meeting notes) and drafts a conforming backlog for your review. The flow: source → LLM
+subagent drafts → you review (accept / edit / abort) → on accept, `lintSprint` validates
+→ write to `sprint-status.yaml`. The skill never writes without your acceptance, and never
+writes a draft that doesn't pass `lintSprint`.
 
-You can also write `sprint-status.yaml` by hand — copy
-[`examples/hello-sprint/sprint-status.yaml`](../../examples/hello-sprint/sprint-status.yaml)
-as your starting template.
+### 2. Run the sprint
 
-### Running the sprint
-
-Once `sprint-status.yaml` exists:
+Once `sprint-status.yaml` exists, use the run-sprint skill:
 
 ```
 /sprint-orchestrator:run-sprint
 ```
 
-The wrapper reads `sprint-status.yaml`, computes a turn cap from the story count, and
-hands the drain condition to `/goal` so the orchestrator keeps going until the backlog is
-fully resolved (or hits the cap).
+The wrapper reads `sprint-status.yaml`, computes a turn cap from the story count (`cap = ceil(story_count * turn_cap_per_story)`), and hands the drain condition to `/goal` so the orchestrator keeps going until the backlog is fully resolved (or hits the cap). `turn_cap_per_story` defaults to **3** and can be overridden in `.sprint-orchestrator/config.yaml`.
 
-The wrapper prints the canonical `/goal` command as its final line — triple-click to copy
-it, then paste in a fresh context window. A clean transcript gives the `/goal` evaluator
-the best chance of correctly deciding when the drain condition is met.
+The wrapper prints the canonical /goal command as the final line of its output, so you can triple-click the last line to copy it.
+
+Paste the /goal command in a fresh context window. A clean transcript gives the /goal evaluator the best chance of correctly deciding when the drain condition is met.
+
+Clipboard auto-copy of the /goal command was investigated this sprint but does not ship — it is tracked as a follow-up. See `_bmad-output/planning-artifacts/follow-ups.md` for the spike notes and promotion criteria.
+
+**Manual override — if you need to invoke `/goal` directly:**
+
+```
+/goal /sprint-orchestrator:process-backlog UNTIL every story in sprint-status.yaml is status=done or status=failed, OR stop after <N> turns
+```
 
 **Fallback — if `/goal` misbehaves:**
 
