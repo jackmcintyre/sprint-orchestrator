@@ -3390,6 +3390,15 @@ async function main(): Promise<number> {
     outcomes.push(...prPerStoryOutcomes);
   }
 
+  // smoketest-followups sprint, story 2: reviewer must push branch before
+  // opening PR. Uses a fake git/gh shim to assert command ordering, and
+  // phrase-locks the reviewer.md instructions.
+  if (!filter || filter.test("reviewer pushes branch before pr create")) {
+    console.log("[e2e] mini-run: reviewer pushes branch before pr create");
+    const pushBeforePROutcomes = await runReviewerPushesBeforePRCreateMiniRun();
+    outcomes.push(...pushBeforePROutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -3961,6 +3970,188 @@ async function runGetOrInitConfigPrPerStoryMiniRun(): Promise<AssertionOutcome[]
       expect(
         skillText.includes(PR_PER_STORY_SETUP_PROMPT),
         `SKILL.md does not contain the phrase-locked PR_PER_STORY_SETUP_PROMPT verbatim. Expected: '${PR_PER_STORY_SETUP_PROMPT}'`,
+      );
+    },
+  });
+
+  return outcomes;
+}
+
+/**
+ * smoketest-followups sprint, story 2 — reviewer pushes branch before pr create.
+ *
+ * Uses a fake git/gh shim (executable shell scripts written to a temp bin dir
+ * prepended to PATH) that records every invocation to a log file.  The test
+ * drives the mandated sequence manually — push then gh pr create — and asserts:
+ *   1. `git push -u origin <branch>` was recorded before `gh pr create`.
+ *   2. When push exits non-zero the test confirms the failure is surfaced
+ *      (the shim records the push attempt and returns exit 1, simulating a
+ *      network/auth failure; the reviewer prompt mandates recordStoryFailure in
+ *      this case rather than proceeding to gh pr create or recordStorySuccess).
+ *   3. A phrase-lock assertion confirms reviewer.md contains the required
+ *      `git push -u origin` pattern and the "before calling gh pr create" phrase.
+ *
+ * Grep tag: "reviewer pushes branch before pr create".
+ */
+async function runReviewerPushesBeforePRCreateMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  // Helper: write a shim script that records its argv to a log and exits with
+  // the given code.  The log format is one JSON line per invocation:
+  //   {"cmd":"git","args":["push","-u","origin","my-branch"]}
+  async function writeShim(
+    binDir: string,
+    shimName: string,
+    exitCode: number,
+    logFile: string,
+  ): Promise<void> {
+    const shimPath = path.join(binDir, shimName);
+    const script = [
+      "#!/usr/bin/env sh",
+      // Append JSON line: {"cmd":"<shimName>","args":[...]}
+      `printf '%s\\n' "$(printf '{"cmd":"${shimName}","args":[' ; first=1 ; for a in "$@"; do [ "$first" = "1" ] || printf ','; printf '"%s"' "$a"; first=0; done; printf ']}')" >> "${logFile}"`,
+      `exit ${exitCode}`,
+      "",
+    ].join("\n");
+    await fs.writeFile(shimPath, script, { mode: 0o755 });
+  }
+
+  // Simulates the reviewer's mandated sequence: push then gh pr create.
+  // Returns the recorded invocations from the log file.
+  async function runShimSequence(
+    pushExitCode: number,
+    branch: string,
+  ): Promise<Array<{ cmd: string; args: string[] }>> {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-push-before-pr-"));
+    try {
+      const logFile = path.join(tmp, "calls.ndjson");
+      // Initialise log file.
+      await fs.writeFile(logFile, "", "utf8");
+
+      const binDir = path.join(tmp, "bin");
+      await fs.mkdir(binDir, { recursive: true });
+
+      await writeShim(binDir, "git", pushExitCode, logFile);
+      await writeShim(binDir, "gh", 0, logFile);
+
+      // Reviewer mandated sequence:
+      //   1. git push -u origin <branch>
+      //   2. gh pr create ... (only if push succeeded)
+      const env = { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
+
+      const pushResult = spawnSync("git", ["push", "-u", "origin", branch], {
+        env,
+        encoding: "utf8",
+      });
+
+      if (pushResult.status === 0) {
+        // Only open PR when push succeeded — this is what reviewer.md mandates.
+        spawnSync("gh", ["pr", "create", "--title", "story done", "--body", ""], {
+          env,
+          encoding: "utf8",
+        });
+      }
+
+      // Parse the log.
+      const raw = await fs.readFile(logFile, "utf8");
+      return raw
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l) as { cmd: string; args: string[] });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  }
+
+  // ── 1. Happy path: push succeeds → gh pr create follows ──────────────────
+  await runOne({
+    name: "reviewer pushes branch before pr create: push succeeds then gh pr create is called",
+    run: async () => {
+      const calls = await runShimSequence(0, "2-my-branch");
+      expect(
+        calls.length >= 2,
+        `expected at least 2 shim calls, got ${calls.length}: ${JSON.stringify(calls)}`,
+      );
+      const pushIdx = calls.findIndex(
+        (c) => c.cmd === "git" && c.args.includes("push") && c.args.includes("-u"),
+      );
+      const prIdx = calls.findIndex(
+        (c) => c.cmd === "gh" && c.args.includes("pr") && c.args.includes("create"),
+      );
+      expect(pushIdx !== -1, `expected git push -u to be recorded; calls=${JSON.stringify(calls)}`);
+      expect(prIdx !== -1, `expected gh pr create to be recorded; calls=${JSON.stringify(calls)}`);
+      expect(
+        pushIdx < prIdx,
+        `expected git push (idx=${pushIdx}) before gh pr create (idx=${prIdx}); calls=${JSON.stringify(calls)}`,
+      );
+    },
+  });
+
+  // ── 2. Push fails → gh pr create must NOT be called ──────────────────────
+  await runOne({
+    name: "reviewer pushes branch before pr create: push failure prevents gh pr create",
+    run: async () => {
+      const calls = await runShimSequence(1, "2-my-branch");
+      const prIdx = calls.findIndex(
+        (c) => c.cmd === "gh" && c.args.includes("pr") && c.args.includes("create"),
+      );
+      expect(
+        prIdx === -1,
+        `expected gh pr create NOT to be called when push fails; calls=${JSON.stringify(calls)}`,
+      );
+      const pushIdx = calls.findIndex(
+        (c) => c.cmd === "git" && c.args.includes("push") && c.args.includes("-u"),
+      );
+      expect(
+        pushIdx !== -1,
+        `expected git push to be attempted even in failure case; calls=${JSON.stringify(calls)}`,
+      );
+    },
+  });
+
+  // ── 3. Phrase-lock: reviewer.md must contain the required instructions ────
+  const reviewerPath = path.resolve(HERE, "..", "agents", "reviewer.md");
+  let reviewerText = "";
+  try {
+    reviewerText = await fs.readFile(reviewerPath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "reviewer pushes branch before pr create: reviewer.md is readable",
+      passed: false,
+      error: `could not read reviewer.md at ${reviewerPath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  await runOne({
+    name: "reviewer pushes branch before pr create: reviewer.md contains git push -u origin instruction",
+    run: () => {
+      expect(
+        /git push.*-u origin|git push.*--set-upstream/.test(reviewerText),
+        `reviewer.md does not contain a 'git push -u origin' (or --set-upstream) instruction`,
+      );
+    },
+  });
+
+  await runOne({
+    name: "reviewer pushes branch before pr create: reviewer.md contains 'before calling gh pr create' phrase",
+    run: () => {
+      expect(
+        reviewerText.includes("before calling gh pr create"),
+        `reviewer.md does not contain the phrase 'before calling gh pr create'`,
       );
     },
   });
