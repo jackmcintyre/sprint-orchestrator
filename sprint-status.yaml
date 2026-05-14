@@ -116,14 +116,14 @@ stories:
     orchestrator:
       claimed_by: dev-run-3
       claimed_at: 2026-05-14T02:33:34.129Z
+      completed_at: 2026-05-14T02:37:34.263Z
+      summary: pr_per_story setup question is now documented and enforced to run before the main loop's
+        first claimStory, with an e2e test asserting the ordering and all verify checks passing.
       rework_count: 0
       base_branch: sprint-smoketest-followups
       branch: 3-pr-per-story-prompt-fires-before-first-c
       branch_prepared_by: dev-run-3
       branch_prepared_at: 2026-05-14T02:33:37.574Z
-      completed_at: 2026-05-14T02:37:34.263Z
-      summary: pr_per_story setup question is now documented and enforced to run before the main loop's
-        first claimStory, with an e2e test asserting the ordering and all verify checks passing.
       artefacts:
         - git:b5df41fa061cb625bdc46dfbbace57d31eae93f5
         - plugins/sprint-orchestrator/skills/process-backlog/SKILL.md
@@ -145,7 +145,7 @@ stories:
       pr_per_story, the orchestrator stops with the setup question before any story is claimed.
   - id: "4"
     title: releaseClaimForStory MCP tool for fast recovery
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -162,7 +162,22 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      rework_count: 0
+      claimed_by: dev-run-4
+      claimed_at: 2026-05-14T02:37:47.662Z
+      rework_count: 1
+      base_branch: sprint-smoketest-followups
+      branch: 4-releaseclaimforstory-mcp-tool-for-fast-r
+      branch_prepared_by: dev-run-4
+      branch_prepared_at: 2026-05-14T02:37:50.549Z
+      last_review_feedback: "3 of 4 AC checks fail. The feat(4) commit only added 2 lines to e2e.ts (a
+        ship gate stub) and contains no actual implementation. Failing checks: (1)
+        release-claim-for-story.ts does not exist at
+        plugins/sprint-orchestrator/packages/mcp-server/src/tools/release-claim-for-story.ts; (2)
+        releaseClaimForStory is not registered in index.ts; (3) pnpm e2e --grep releaseClaimForStory
+        matches 0 assertions (0/0 passed) because no e2e tests were written. The tool
+        implementation, index registration, and e2e tests covering happy path, agentId mismatch
+        rejection, and idempotency must all be authored."
+      last_review_at: 2026-05-14T02:41:02.091Z
     notes: >
       During the smoketest, when `prepareStoryBranch` for story 2 hit the default_base-stale guard
       immediately after `claimStory`, story 2 was stuck in `in_progress` with a fresh claim.
