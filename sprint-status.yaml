@@ -22,8 +22,8 @@ stories:
     orchestrator:
       claimed_by: dev-run-1
       claimed_at: 2026-05-14T02:24:30.785Z
-      rework_count: 0
       last_failure_reason: "Acceptance criteria failed: shell, shell, shell"
+      rework_count: 0
       failed_at: 2026-05-14T02:25:00.377Z
     notes: >
       During the mvp-polish smoketest, the reviewer subagent spawned for story 1 silently processed
@@ -44,7 +44,7 @@ stories:
       for a non-claimed story is rejected by the MCP layer with a clear error.
   - id: "2"
     title: Reviewer must push branch before opening PR
-    status: ready
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -62,7 +62,21 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-run-2
+      claimed_at: 2026-05-14T02:25:53.690Z
       rework_count: 0
+      base_branch: sprint-smoketest-followups
+      branch: 2-reviewer-must-push-branch-before-opening
+      branch_prepared_by: dev-run-2
+      branch_prepared_at: 2026-05-14T02:25:56.610Z
+      completed_at: 2026-05-14T02:31:48.181Z
+      summary: Reviewer agent prompt updated to mandate git push before gh pr create, with a push-failure
+        guard; e2e test added with fake git/gh shims asserting correct command order and
+        push-failure handling.
+      artefacts:
+        - git:dcc319ac7075fcb3ce1ecffdc1e75b2e487fed9c
+        - plugins/sprint-orchestrator/agents/reviewer.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: >
       During the smoketest with pr_per_story enabled, the reviewer committed story work to a
       per-story branch but never pushed it to origin. `gh pr create` either failed silently or was
