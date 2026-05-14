@@ -276,8 +276,28 @@ async function driveHappyPathStory(
 
   const branchAtCommitTime = currentBranch(ctx.projectRoot);
 
-  // Real flow: dev commits artefacts FIRST, then markStoryComplete persists state.
+  // Real flow: dev commits artefacts FIRST, signals hand-off via
+  // markDevReturned, then the reviewer calls markStoryComplete.
   await commitStoryArtefacts(ctx, storyId);
+
+  // Signal that the dev subagent has finished its swing. This sets
+  // orchestrator.dev_returned_at, which recordStoryFailure and
+  // validateAcceptanceCriteria require before they will evaluate ACs.
+  await markDevReturned(ctx, storyId, agent);
+
+  // When pr_per_story is true, markStoryComplete enforces that the per-story
+  // branch has been pushed to origin and a PR exists before it will mark the
+  // story done. The e2e drives the full happy-path flow — including the push —
+  // so that the happy-path assertions reflect real-world reviewer behaviour.
+  if (prep.branch !== null) {
+    const push = git(ctx.projectRoot, ["push", "-u", "origin", prep.branch]);
+    if (push.status !== 0) {
+      throw new Error(
+        `driveHappyPathStory: git push -u origin ${prep.branch} failed: ${push.stderr.trim()}`,
+      );
+    }
+  }
+
   await markStoryComplete(ctx, storyId, agent, `e2e: ${storyId} done`);
   await logStoryEnd(ctx.projectRoot, storyId, "complete");
 
@@ -350,60 +370,126 @@ async function buildAssertions(root: string): Promise<Assertion[]> {
       "layout: custom",
       "autoDetected: false",
       "pr_per_story: true",
+      'default_base: "main"',
       "",
     ].join("\n"),
     "utf8",
   );
 
-  // Drive the full flow once, capture artifacts, then run assertions.
-  // A needs a real code change so the "two commits" assertion is meaningful;
-  // its fixture AC just checks src/hello.txt exists, but commitStoryArtefacts
-  // needs *something* in the working tree to commit as the "code" half.
-  const happy = await driveHappyPathStory(ctx, "A", "agent-A", async () => {
-    await fs.writeFile(path.join(root, "src", "hello.txt"), "hello (modified by A)\n", "utf8");
-  });
-
-  // Auto-promotion check happens BEFORE we touch B. After A is done,
-  // getReadyStories should promote B from backlog to ready.
+  // The pr_per_story=true gate in markStoryComplete requires:
+  //   1. The per-story branch to be pushed to origin.
+  //   2. An open PR to exist for that branch.
   //
-  // We deliberately exercise the **published** entry (dist/) here, not the
-  // TypeScript source. The orchestrator skill talks to the MCP server via
-  // `node dist/index.js` (see plugins/sprint-orchestrator/.mcp.json), so a
-  // src-only test is not a faithful repro of Jack's case. When dist is stale
-  // relative to src (e.g. a fix that landed without rebuilding dist), this
-  // assertion fails — exactly the silent regression Jack hit on Tinytodo
-  // after bugfix-1 story #2 supposedly landed the promote helper.
-  const ready = await getReadyStoriesViaDist(ctx);
-  const readyIds = ready.map((s) => s.id);
+  // For the e2e happy-path run we satisfy (1) by adding a local bare repo as
+  // the "origin" remote (so `git push -u origin <branch>` succeeds), and (2)
+  // by prepending a `gh` shim to PATH that returns a fake open PR list. This
+  // lets driveHappyPathStory simulate the full reviewer flow without requiring
+  // a real GitHub remote. The shim is installed for the drive phase only and
+  // removed in the finally block.
+  //
+  // The push-gate enforcement mini-run (runPrPerStoryEnforcementMiniRun) is
+  // separate and explicitly uses a repo with NO remote so it can assert the
+  // refusal path — it is not affected by this local shim.
+  const bareDir = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-origin-"));
+  const ghShimDir = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-ghshim-"));
+  const originalPath = process.env.PATH ?? "";
 
-  // Drive B (the auto-promoted story). Dev creates src/world.txt to satisfy AC,
-  // AND seeds a NESTED workspace package's node_modules + dist directories.
-  // This is the regression captured from PR #16 retest: top-level pathspec
-  // exclusions (`:!node_modules`) only match repo-root, not deep paths like
-  // apps/server/node_modules/. The fix is `:(exclude,glob)**/node_modules/**`.
+  // Set up the bare remote.
+  const bareInitResult = git(bareDir, ["init", "--bare", "-q"]);
+  if (bareInitResult.status !== 0)
+    throw new Error(`bare repo init failed: ${bareInitResult.stderr}`);
+  const remoteAddResult = git(root, ["remote", "add", "origin", bareDir]);
+  if (remoteAddResult.status !== 0)
+    throw new Error(`git remote add failed: ${remoteAddResult.stderr}`);
+
+  // Push main to origin so the remote is primed (required for git to accept
+  // --set-upstream on feature branches that come later).
+  const pushMainResult = git(root, ["push", "-u", "origin", "main"]);
+  if (pushMainResult.status !== 0)
+    throw new Error(`initial push main failed: ${pushMainResult.stderr}`);
+
+  // Install a gh shim that returns a non-empty open PR list for any `pr list`
+  // call. The shim is a plain shell script that writes the fake JSON to stdout
+  // and exits 0. It is scoped to this buildAssertions drive phase only.
+  const ghShimPath = path.join(ghShimDir, "gh");
+  await fs.writeFile(
+    ghShimPath,
+    [
+      "#!/usr/bin/env sh",
+      // For any `gh pr list` invocation return a single open PR so the
+      // push-gate PR check passes. All other gh subcommands are no-ops.
+      'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
+      '  printf \'[{"number":1,"state":"OPEN"}]\\n\'',
+      "  exit 0",
+      "fi",
+      "exit 0",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  process.env.PATH = `${ghShimDir}:${originalPath}`;
+
+  let happy: DriveResult;
   let bDriven: DriveResult | null = null;
-  if (readyIds.includes("B")) {
-    bDriven = await driveHappyPathStory(ctx, "B", "agent-B", async () => {
-      await fs.writeFile(path.join(root, "src", "world.txt"), "world\n", "utf8");
-      // Simulate a nested workspace package whose tooling produces dist + node_modules.
-      const nested = path.join(root, "apps", "server");
-      await fs.mkdir(path.join(nested, "node_modules", "fake-dep"), { recursive: true });
-      await fs.writeFile(
-        path.join(nested, "node_modules", "fake-dep", "index.js"),
-        "// dep\n",
-        "utf8",
-      );
-      await fs.mkdir(path.join(nested, "dist"), { recursive: true });
-      await fs.writeFile(path.join(nested, "dist", "bundle.js"), "// built\n", "utf8");
-      await fs.mkdir(path.join(nested, "src"), { recursive: true });
-      await fs.writeFile(path.join(nested, "src", "app.ts"), "// real source\n", "utf8");
+  let readyIds: string[];
+  let finalState: Awaited<ReturnType<typeof readSprintStatus>>;
+  try {
+    // Drive the full flow once, capture artifacts, then run assertions.
+    // A needs a real code change so the "two commits" assertion is meaningful;
+    // its fixture AC just checks src/hello.txt exists, but commitStoryArtefacts
+    // needs *something* in the working tree to commit as the "code" half.
+    happy = await driveHappyPathStory(ctx, "A", "agent-A", async () => {
+      await fs.writeFile(path.join(root, "src", "hello.txt"), "hello (modified by A)\n", "utf8");
     });
+
+    // Auto-promotion check happens BEFORE we touch B. After A is done,
+    // getReadyStories should promote B from backlog to ready.
+    //
+    // We deliberately exercise the **published** entry (dist/) here, not the
+    // TypeScript source. The orchestrator skill talks to the MCP server via
+    // `node dist/index.js` (see plugins/sprint-orchestrator/.mcp.json), so a
+    // src-only test is not a faithful repro of Jack's case. When dist is stale
+    // relative to src (e.g. a fix that landed without rebuilding dist), this
+    // assertion fails — exactly the silent regression Jack hit on Tinytodo
+    // after bugfix-1 story #2 supposedly landed the promote helper.
+    const ready = await getReadyStoriesViaDist(ctx);
+    readyIds = ready.map((s) => s.id);
+
+    // Drive B (the auto-promoted story). Dev creates src/world.txt to satisfy AC,
+    // AND seeds a NESTED workspace package's node_modules + dist directories.
+    // This is the regression captured from PR #16 retest: top-level pathspec
+    // exclusions (`:!node_modules`) only match repo-root, not deep paths like
+    // apps/server/node_modules/. The fix is `:(exclude,glob)**/node_modules/**`.
+    if (readyIds.includes("B")) {
+      bDriven = await driveHappyPathStory(ctx, "B", "agent-B", async () => {
+        await fs.writeFile(path.join(root, "src", "world.txt"), "world\n", "utf8");
+        // Simulate a nested workspace package whose tooling produces dist + node_modules.
+        const nested = path.join(root, "apps", "server");
+        await fs.mkdir(path.join(nested, "node_modules", "fake-dep"), { recursive: true });
+        await fs.writeFile(
+          path.join(nested, "node_modules", "fake-dep", "index.js"),
+          "// dep\n",
+          "utf8",
+        );
+        await fs.mkdir(path.join(nested, "dist"), { recursive: true });
+        await fs.writeFile(path.join(nested, "dist", "bundle.js"), "// built\n", "utf8");
+        await fs.mkdir(path.join(nested, "src"), { recursive: true });
+        await fs.writeFile(path.join(nested, "src", "app.ts"), "// real source\n", "utf8");
+      });
+    }
+
+    // Drive C → failed.
+    await driveFailingStory(ctx, "C", "agent-C", "designed-to-fail");
+
+    finalState = await readSprintStatus(ctx.sprintStatusPath);
+  } finally {
+    // Restore the original PATH so the gh shim does not affect subsequent
+    // mini-runs (e.g. runPrPerStoryEnforcementMiniRun relies on gh being absent).
+    process.env.PATH = originalPath;
+    await fs.rm(ghShimDir, { recursive: true, force: true });
+    await fs.rm(bareDir, { recursive: true, force: true });
   }
 
-  // Drive C → failed.
-  await driveFailingStory(ctx, "C", "agent-C", "designed-to-fail");
-
-  const finalState = await readSprintStatus(ctx.sprintStatusPath);
   const storyA = finalState.stories.find((s) => s.id === "A");
   const storyB = finalState.stories.find((s) => s.id === "B");
   const storyC = finalState.stories.find((s) => s.id === "C");

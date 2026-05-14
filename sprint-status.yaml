@@ -2,7 +2,7 @@ sprint_id: orchestrator-hardening-followup
 stories:
   - id: "1"
     title: Fix the 5 happy-path e2e regressions surfaced by hardening sprint's ship gate
-    status: ready
+    status: in_progress
     depends_on: []
     acceptance_criteria:
       checks:
@@ -12,6 +12,14 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      claimed_by: dev-retry2-1747258500
+      claimed_at: 2026-05-14T07:19:21.914Z
+      rework_count: 0
+      branch: 1-fix-the-5-happy-path-e2e-regressions-sur
+      branch_prepared_by: dev-retry2-1747258500
+      branch_prepared_at: 2026-05-14T07:19:26.727Z
+      base_branch: main
     notes: >
       Five happy-path e2e assertions broke when the orchestrator-hardening guards landed (PRs
       #29–#33). The failures were correctly caught by hardening's ship gate (story 6, failed by
@@ -58,8 +66,8 @@ stories:
           for any collateral regressions.
 
 
-      Full developer context in _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
-
+      Full developer context in
+      _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
   - id: "2"
     title: Dev spawn prompt hardening — mandatory tool calls and decide-and-ship directives
     status: ready
@@ -67,24 +75,30 @@ stories:
     acceptance_criteria:
       checks:
         - type: shell
-          cmd: test -f plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
+          cmd: test -f
+            plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
           expect_exit: 0
         - type: shell
-          cmd: grep -q MANDATORY_TOOL_CALL_DIRECTIVE plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
+          cmd: grep -q MANDATORY_TOOL_CALL_DIRECTIVE
+            plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
           expect_exit: 0
         - type: shell
-          cmd: grep -q DECIDE_AND_SHIP_DIRECTIVE plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
+          cmd: grep -q DECIDE_AND_SHIP_DIRECTIVE
+            plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
           expect_exit: 0
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "agents/dev.md contains mandatory tool-call and decide-and-ship directives verbatim"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "agents/dev.md contains mandatory tool-call
+            and decide-and-ship directives verbatim"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
       During hardening, the dev subagent stalled mid-research on 3 of 5 stories. Each needed 2–3
-      spawns because the dev would reach a decision point and return early instead of finishing.
-      Two patterns observed:
+      spawns because the dev would reach a decision point and return early instead of finishing. Two
+      patterns observed:
 
 
         1. Required tool calls buried in story notes were skipped — markDevReturned was described
@@ -129,14 +143,14 @@ stories:
         stalls or skipped mandatory tool calls. This is a directional metric, not an AC.
 
 
-      Full developer context in _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
+      Full developer context in
+      _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
 
 
       Note: this story also touches the deferred dev-spawn-no-questions follow-up
-      (`feedback-dev-spawn-no-questions` in memory). If the dev finds it cheap to add a third
-      "no clarifying questions" directive in the same module, they should — surface in the
+      (`feedback-dev-spawn-no-questions` in memory). If the dev finds it cheap to add a third "no
+      clarifying questions" directive in the same module, they should — surface in the
       implementation summary so the reviewer can decide whether to expand scope or defer.
-
   - id: "3"
     title: run-sprint refuses to launch with uncommitted sprint-status.yaml
     status: ready
@@ -153,16 +167,19 @@ stories:
           cmd: grep -q "Commit sprint-status.yaml" _bmad-output/planning-artifacts/planning-discipline.md
           expect_exit: 0
         - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint refuses when sprint-status.yaml has uncommitted changes"
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint refuses when sprint-status.yaml
+            has uncommitted changes"
           expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
-      During the hardening sprint launch, sprint-status.yaml was never committed. When PR #29
-      merged to main, the merge overwrote the live backlog file. Manual recovery from a dangling
-      git blob was scrappy and one-off; an external user hitting this would lose their backlog
-      with no recovery path.
+      During the hardening sprint launch, sprint-status.yaml was never committed. When PR #29 merged
+      to main, the merge overwrote the live backlog file. Manual recovery from a dangling git blob
+      was scrappy and one-off; an external user hitting this would lose their backlog with no
+      recovery path.
 
 
       CONCRETE ACTIONS:
@@ -191,12 +208,12 @@ stories:
 
 
       The third AC check above (grep planning-discipline.md) is the planning-discipline rule
-      addition. The second AC check (grep packages/mcp-server/src/tools) covers either module
-      home option — the constant must exist somewhere under packages/mcp-server/src/tools.
+      addition. The second AC check (grep packages/mcp-server/src/tools) covers either module home
+      option — the constant must exist somewhere under packages/mcp-server/src/tools.
 
 
-      Full developer context in _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
-
+      Full developer context in
+      _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
   - id: "4"
     title: Ship gate — pnpm e2e + pnpm verify green + manual pr_per_story=true smoketest
     status: ready
@@ -212,6 +229,8 @@ stories:
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
+    orchestrator:
+      rework_count: 0
     notes: >
       Verification-only ship gate per planning-discipline Rule 3. Mechanical gates checked above.
 
@@ -237,10 +256,10 @@ stories:
            verified live).
 
 
-      Manual smoketest result (pass/fail + notes per the 6 checks above) is recorded in the
-      reviewer summary before recordStorySuccess. If any check fails, route rework to the offending
-      story (1-3 from this sprint OR back to hardening if a hardening guard misbehaves), NOT to
-      this ship gate.
+      Manual smoketest result (pass/fail + notes per the 6 checks above) is recorded in the reviewer
+      summary before recordStorySuccess. If any check fails, route rework to the offending story
+      (1-3 from this sprint OR back to hardening if a hardening guard misbehaves), NOT to this ship
+      gate.
 
 
       ONCE THIS SHIP GATE PASSES:
