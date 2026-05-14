@@ -38,6 +38,7 @@ import { planRunSprint } from "../packages/mcp-server/src/tools/plan-run-sprint.
 // Kept for the deprecated stale-mini-run function bodies; not referenced
 // by any active assertion in this file.
 import { UNCOMMITTED_BACKLOG_REFUSAL } from "../packages/mcp-server/src/tools/run-sprint-preflight-phrases.js";
+import { STALE_BRANCH_HAS_REAL_WORK_REFUSAL } from "../packages/mcp-server/src/tools/stale-branch-phrases.js";
 import {
   CLIPBOARD_AUTOCOPY_NOTE_LINE,
   CLIPBOARD_OPT_OUT_ENV_VAR,
@@ -4042,6 +4043,34 @@ async function main(): Promise<number> {
     outcomes.push(...shipGateOutcomes);
   }
 
+  // orchestrator-state-and-shipgate sprint, story 3 (B9 fix):
+  // prepareStoryBranch auto-cleans bookkeeping-only stale per-story
+  // branches instead of blowing up with "branch already exists".
+  if (!filter || filter.test("prepareStoryBranch auto-cleans stale bookkeeping-only branch")) {
+    console.log("[e2e] mini-run: prepareStoryBranch auto-cleans bookkeeping-only stale branch");
+    const cleanOutcomes = await runStaleBranchAutoCleanMiniRun();
+    outcomes.push(...cleanOutcomes);
+  }
+
+  // Same sprint, story 3: prepareStoryBranch refuses when the stale branch
+  // carries real feat/fix work, surfacing the phrase-locked refusal.
+  if (
+    !filter ||
+    filter.test("prepareStoryBranch refuses to delete branch with real feat/fix commits")
+  ) {
+    console.log("[e2e] mini-run: prepareStoryBranch refuses stale branch with real work");
+    const refuseOutcomes = await runStaleBranchRealWorkRefusalMiniRun();
+    outcomes.push(...refuseOutcomes);
+  }
+
+  // Same sprint, story 3: recordStoryFailure deletes local + remote
+  // per-story branches as part of the failure transition.
+  if (!filter || filter.test("recordStoryFailure cleans up local and remote per-story branches")) {
+    console.log("[e2e] mini-run: recordStoryFailure deletes local + remote per-story branches");
+    const failCleanOutcomes = await runRecordStoryFailureBranchCleanupMiniRun();
+    outcomes.push(...failCleanOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -5962,6 +5991,408 @@ async function runPrPerStoryEnforcementMiniRun(): Promise<AssertionOutcome[]> {
           story?.status === "in_progress",
           `expected story status=in_progress after refusal, got ${String(story?.status)}`,
         );
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * orchestrator-state-and-shipgate sprint, story 3 (B9 fix) —
+ * prepareStoryBranch auto-cleans a leftover per-story branch that contains
+ * ONLY orchestrator bookkeeping commits (chore(sprint): / chore(ship-gate):).
+ *
+ * Repro: stand up a tiny repo, create the branch the next prepareStoryBranch
+ * call will target, lay down a single `chore(sprint):` commit on it, hop back
+ * to main, then drive prepareStoryBranch. Without the fix, `git checkout -b`
+ * would fail with "branch already exists" and the orchestrator would surface
+ * a 3-prompt human approval dance. With the fix, the branch is deleted +
+ * recreated transparently.
+ *
+ * Grep tag: "prepareStoryBranch auto-cleans stale bookkeeping-only branch"
+ */
+async function runStaleBranchAutoCleanMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-b9-clean-"));
+  try {
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    const sprintYaml = [
+      "schema_version: 1",
+      "sprint_id: b9-clean-test",
+      "stories:",
+      "  - id: s1",
+      "    title: Story under test",
+      "    status: ready",
+      "    acceptance_criteria: { checks: [] }",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, "state.yaml"), sprintYaml, "utf8");
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".sprint-orchestrator/\n", "utf8");
+    g(["add", ".gitignore"]);
+    g(["commit", "-q", "-m", "init"]);
+
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: .sprint-orchestrator/state.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, ".sprint-orchestrator", "state.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // The branch name prepareStoryBranch would compute for story s1.
+    const targetBranch = "s1-story-under-test";
+
+    // Simulate a prior failed run: create the branch, lay down a single
+    // bookkeeping commit (chore(sprint):), then hop back to main.
+    g(["checkout", "-q", "-b", targetBranch]);
+    await fs.writeFile(path.join(tmp, "bookkeeping.txt"), "stub\n", "utf8");
+    g(["add", "bookkeeping.txt"]);
+    g(["commit", "-q", "-m", "chore(sprint): persist s1 metadata"]);
+    g(["checkout", "-q", "main"]);
+
+    // Sanity: branch exists before we run prepareStoryBranch.
+    const existsBefore = g([
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/heads/${targetBranch}`,
+    ]).status;
+
+    // Drive: claim then prepareStoryBranch. Should NOT throw.
+    await claimStory(ctx, "s1", "agent-b9-clean");
+    const prep = await prepareStoryBranch(ctx, "s1", "agent-b9-clean");
+
+    await runOne({
+      name: "prepareStoryBranch auto-cleans stale bookkeeping-only branch: targeted branch existed before the call",
+      run: () => {
+        expect(existsBefore === 0, `expected branch to exist before drive, exit=${existsBefore}`);
+      },
+    });
+
+    await runOne({
+      name: "prepareStoryBranch auto-cleans stale bookkeeping-only branch: returns the recreated branch (not skipped)",
+      run: () => {
+        expect(
+          prep.skipped === false && prep.branch === targetBranch,
+          `expected branch=${targetBranch} skipped=false, got ${JSON.stringify(prep)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "prepareStoryBranch auto-cleans stale bookkeeping-only branch: HEAD is on the recreated branch and rooted at main",
+      run: () => {
+        const head = g(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
+        expect(head === targetBranch, `expected HEAD on ${targetBranch}, got ${head}`);
+        // After recreation the branch must be at the main tip (zero commits
+        // ahead of main). The bookkeeping commit must NOT have survived.
+        const ahead = g(["rev-list", "--count", `main..${targetBranch}`]).stdout.trim();
+        expect(ahead === "0", `expected recreated branch 0 commits ahead of main, got ${ahead}`);
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * orchestrator-state-and-shipgate sprint, story 3 (B9 fix) — refusal path.
+ *
+ * Stale branch with a `feat(<id>):` commit on it must NOT be deleted.
+ * prepareStoryBranch surfaces STALE_BRANCH_HAS_REAL_WORK_REFUSAL verbatim
+ * so a human can decide what to do with the unmerged work.
+ *
+ * Grep tag: "prepareStoryBranch refuses to delete branch with real feat/fix commits"
+ */
+async function runStaleBranchRealWorkRefusalMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-b9-refuse-"));
+  try {
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    const sprintYaml = [
+      "schema_version: 1",
+      "sprint_id: b9-refuse-test",
+      "stories:",
+      "  - id: s1",
+      "    title: Story under test",
+      "    status: ready",
+      "    acceptance_criteria: { checks: [] }",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, "state.yaml"), sprintYaml, "utf8");
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".sprint-orchestrator/\n", "utf8");
+    g(["add", ".gitignore"]);
+    g(["commit", "-q", "-m", "init"]);
+
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: .sprint-orchestrator/state.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, ".sprint-orchestrator", "state.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    const targetBranch = "s1-story-under-test";
+
+    // Simulate a leftover branch with REAL work on it.
+    g(["checkout", "-q", "-b", targetBranch]);
+    await fs.writeFile(path.join(tmp, "real-work.txt"), "unmerged stuff\n", "utf8");
+    g(["add", "real-work.txt"]);
+    g(["commit", "-q", "-m", "feat(s1): unmerged human-meaningful work"]);
+    g(["checkout", "-q", "main"]);
+
+    await claimStory(ctx, "s1", "agent-b9-refuse");
+
+    let thrown: Error | null = null;
+    try {
+      await prepareStoryBranch(ctx, "s1", "agent-b9-refuse");
+    } catch (err) {
+      thrown = err as Error;
+    }
+
+    await runOne({
+      name: "prepareStoryBranch refuses to delete branch with real feat/fix commits: throws an error",
+      run: () => {
+        expect(
+          thrown !== null,
+          `expected prepareStoryBranch to throw on real-work stale branch, but it returned`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "prepareStoryBranch refuses to delete branch with real feat/fix commits: error message contains the phrase-locked refusal",
+      run: () => {
+        const msg = thrown?.message ?? "";
+        expect(
+          msg.includes(STALE_BRANCH_HAS_REAL_WORK_REFUSAL),
+          `expected refusal phrase in error message, got: ${msg}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "prepareStoryBranch refuses to delete branch with real feat/fix commits: stale branch and its feat commit are preserved",
+      run: () => {
+        const exists = g(["rev-parse", "--verify", "--quiet", `refs/heads/${targetBranch}`]).status;
+        expect(exists === 0, `expected stale branch to still exist, exit=${exists}`);
+        const subjects = g(["log", "--format=%s", `main..${targetBranch}`]).stdout.trim();
+        expect(
+          subjects.includes("feat(s1):"),
+          `expected feat(s1): commit preserved on stale branch, got subjects=${subjects}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * orchestrator-state-and-shipgate sprint, story 3 (B9 fix) — failure cleanup.
+ *
+ * After recordStoryFailure, the per-story branch on local + remote must be
+ * gone (when it's bookkeeping-only). Otherwise the next attempt at the same
+ * story would hit the "branch already exists" wall.
+ *
+ * Grep tag: "recordStoryFailure cleans up local and remote per-story branches"
+ */
+async function runRecordStoryFailureBranchCleanupMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-b9-fail-clean-"));
+  try {
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    const sprintYaml = [
+      "schema_version: 1",
+      "sprint_id: b9-fail-clean-test",
+      "stories:",
+      "  - id: s1",
+      "    title: Story under test",
+      "    status: ready",
+      "    acceptance_criteria: { checks: [] }",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, "state.yaml"), sprintYaml, "utf8");
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".sprint-orchestrator/\n", "utf8");
+    g(["add", ".gitignore"]);
+    g(["commit", "-q", "-m", "init"]);
+
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: .sprint-orchestrator/state.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // Stand up a bare repo as origin.
+    const bareRemote = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-b9-origin-"));
+    spawnSync("git", ["init", "--bare", "-q", bareRemote], { encoding: "utf8" });
+    g(["remote", "add", "origin", bareRemote]);
+    g(["push", "-u", "origin", "main"]);
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, ".sprint-orchestrator", "state.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // Claim + prepare so the per-story branch is created locally.
+    await claimStory(ctx, "s1", "agent-b9-fail");
+    const prep = await prepareStoryBranch(ctx, "s1", "agent-b9-fail");
+    expect(
+      prep.skipped === false && typeof prep.branch === "string" && prep.branch.length > 0,
+      `expected per-story branch to be created, got ${JSON.stringify(prep)}`,
+    );
+    const branch = prep.branch as string;
+
+    // Push the (zero-diff) branch to origin so remote has it too. Use a
+    // ship-gate empty commit so the branch is bookkeeping-only ahead of base.
+    g(["commit", "--quiet", "--allow-empty", "-m", "chore(ship-gate): s1 verification only"]);
+    g(["push", "-u", "origin", branch]);
+
+    // Sanity: branch exists locally AND on the remote before failure.
+    const localBefore = g(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).status;
+    const remoteBefore = g([
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/remotes/origin/${branch}`,
+    ]).status;
+
+    // Drive failure: mark dev returned, then recordStoryFailure.
+    await markDevReturned(ctx, "s1", "agent-b9-fail");
+    await markStoryFailed(ctx, "s1", "AC failed: smoke");
+
+    // Re-fetch origin so the deleted ref is reflected locally.
+    g(["fetch", "--prune", "origin"]);
+
+    const localAfter = g(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).status;
+    const remoteAfter = g([
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/remotes/origin/${branch}`,
+    ]).status;
+
+    await runOne({
+      name: "recordStoryFailure cleans up local and remote per-story branches: branch existed on both sides before failure",
+      run: () => {
+        expect(
+          localBefore === 0 && remoteBefore === 0,
+          `expected branch on both sides pre-failure, local=${localBefore} remote=${remoteBefore}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "recordStoryFailure cleans up local and remote per-story branches: local branch is gone after failure",
+      run: () => {
+        expect(localAfter !== 0, `expected local branch deleted, exit=${localAfter}`);
+      },
+    });
+
+    await runOne({
+      name: "recordStoryFailure cleans up local and remote per-story branches: remote branch is gone after failure",
+      run: () => {
+        expect(remoteAfter !== 0, `expected remote branch deleted, exit=${remoteAfter}`);
       },
     });
   } finally {
