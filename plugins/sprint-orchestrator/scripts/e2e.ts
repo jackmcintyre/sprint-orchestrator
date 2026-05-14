@@ -78,6 +78,10 @@ import {
   DEFAULT_REVIEWER_MODEL,
 } from "../packages/mcp-server/src/tools/model-tiering-defaults.js";
 import { RESOLVE_SPAWN_MODEL_INSTRUCTION } from "../packages/mcp-server/src/tools/process-backlog-spawn-phrases.js";
+import {
+  DECIDE_AND_SHIP_DIRECTIVE,
+  MANDATORY_TOOL_CALL_DIRECTIVE,
+} from "../packages/mcp-server/src/tools/dev-agent-behavioural-directives.js";
 import { PR_PER_STORY_SETUP_PROMPT } from "../packages/mcp-server/src/tools/pr-per-story-setup-phrases.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -3792,6 +3796,21 @@ async function main(): Promise<number> {
     outcomes.push(...resolveOutcomes);
   }
 
+  // orchestrator-hardening sprint, story 2: agents/dev.md must contain the
+  // mandatory tool-call and decide-and-ship behavioural directives verbatim,
+  // so the dev subagent prose and the phrase-locked constants in
+  // dev-agent-behavioural-directives.ts cannot drift.
+  if (
+    !filter ||
+    filter.test(
+      "agents/dev.md contains mandatory tool-call and decide-and-ship directives verbatim",
+    )
+  ) {
+    console.log("[e2e] mini-run: agents/dev.md behavioural directives phrase-lock");
+    const devDirectivesOutcomes = await runDevAgentBehaviouralDirectivesMiniRun();
+    outcomes.push(...devDirectivesOutcomes);
+  }
+
   // model-tiering-v1 sprint, story 2: rework escalation — dev re-spawns after
   // rework jump to Opus regardless of static defaults; reviewer never escalates.
   if (!filter || filter.test("resolveSpawnModel escalates dev on rework only")) {
@@ -4094,6 +4113,77 @@ async function runResolveSpawnModelStaticMiniRun(): Promise<AssertionOutcome[]> 
       expect(
         typeof DEFAULT_REVIEWER_MODEL === "string" && DEFAULT_REVIEWER_MODEL.length > 0,
         `DEFAULT_REVIEWER_MODEL must be a non-empty string, got ${JSON.stringify(DEFAULT_REVIEWER_MODEL)}`,
+      );
+    },
+  });
+
+  return outcomes;
+}
+
+/**
+ * orchestrator-hardening sprint, story 2 — dev subagent behavioural
+ * directives phrase-lock.
+ *
+ * The dev subagent stalled mid-research on 3 of 5 hardening stories.
+ * Two patterns: skipped mandatory MCP tool calls (e.g. markDevReturned)
+ * and early returns at decision points instead of picking one viable
+ * approach and shipping. The fix lives in agents/dev.md as a labelled
+ * "Behavioural directives (do not skip)" block whose two bullets must
+ * contain the verbatim text of MANDATORY_TOOL_CALL_DIRECTIVE and
+ * DECIDE_AND_SHIP_DIRECTIVE from
+ * packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts.
+ *
+ * Identical phrase-lock shape to the SKILL.md / RESOLVE_SPAWN_MODEL_INSTRUCTION
+ * check — load both constants, load agents/dev.md as a string, assert
+ * each appears verbatim.
+ *
+ * Grep tag: "agents/dev.md contains mandatory tool-call and decide-and-ship directives verbatim".
+ */
+async function runDevAgentBehaviouralDirectivesMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const devMdPath = path.resolve(HERE, "..", "agents", "dev.md");
+  let devMdText = "";
+  try {
+    devMdText = await fs.readFile(devMdPath, "utf8");
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    outcomes.push({
+      name: "agents/dev.md contains mandatory tool-call and decide-and-ship directives verbatim: dev.md is readable",
+      passed: false,
+      error: `could not read agents/dev.md at ${devMdPath}: ${msg}`,
+    });
+    return outcomes;
+  }
+
+  await runOne({
+    name: "agents/dev.md contains mandatory tool-call and decide-and-ship directives verbatim: MANDATORY_TOOL_CALL_DIRECTIVE",
+    run: () => {
+      expect(
+        devMdText.includes(MANDATORY_TOOL_CALL_DIRECTIVE),
+        `agents/dev.md does not contain MANDATORY_TOOL_CALL_DIRECTIVE verbatim. Expected: '${MANDATORY_TOOL_CALL_DIRECTIVE}'`,
+      );
+    },
+  });
+
+  await runOne({
+    name: "agents/dev.md contains mandatory tool-call and decide-and-ship directives verbatim: DECIDE_AND_SHIP_DIRECTIVE",
+    run: () => {
+      expect(
+        devMdText.includes(DECIDE_AND_SHIP_DIRECTIVE),
+        `agents/dev.md does not contain DECIDE_AND_SHIP_DIRECTIVE verbatim. Expected: '${DECIDE_AND_SHIP_DIRECTIVE}'`,
       );
     },
   });

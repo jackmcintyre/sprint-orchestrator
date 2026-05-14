@@ -76,7 +76,7 @@ stories:
       _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
   - id: "2"
     title: Dev spawn prompt hardening — mandatory tool calls and decide-and-ship directives
-    status: failed
+    status: done
     depends_on: []
     acceptance_criteria:
       checks:
@@ -100,9 +100,8 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
-      claimed_by: dev-90219e38-s2-retry
-      claimed_at: 2026-05-14T08:37:20.428Z
-      last_failure_reason: "Acceptance criteria failed: shell, shell, shell, shell"
+      claimed_by: dev-90219e38-s2-recover2
+      claimed_at: 2026-05-14T08:52:40.575Z
       rework_count: 0
       base_branch: main
       reopen_history:
@@ -118,11 +117,25 @@ stories:
             their behalf to unblock the state machine. No basis for a rework retry — the dev did
             nothing.
           reopened_by_agent_id: human-jack
-      failed_at: 2026-05-14T08:37:45.816Z
-      dev_returned_at: 2026-05-14T08:15:11.724Z
+        - reopened_at: 2026-05-14T08:50:45.920Z
+          reason: spurious failure — prepareStoryBranch stale-base path side-effected status=failed before dev
+            ran; dev work shipped cleanly (commit cad9924) with all ACs green
+          prior_status: failed
+          prior_failure_reason: "Acceptance criteria failed: shell, shell, shell, shell"
+          reopened_by_agent_id: human-jack
+      dev_returned_at: 2026-05-14T08:53:10.387Z
       branch: 2-dev-spawn-prompt-hardening-mandatory-too
-      branch_prepared_by: dev-90219e38-s2
-      branch_prepared_at: 2026-05-14T08:10:07.529Z
+      branch_prepared_by: dev-90219e38-s2-retry
+      branch_prepared_at: 2026-05-14T08:43:46.735Z
+      completed_at: 2026-05-14T08:54:17.242Z
+      summary: Shipped dev-agent-behavioural-directives.ts with MANDATORY_TOOL_CALL_DIRECTIVE and
+        DECIDE_AND_SHIP_DIRECTIVE constants, injected both into agents/dev.md, and added a
+        phrase-lock e2e test; all 5 ACs pass (build, typecheck, lint, unit tests, e2e).
+      artefacts:
+        - git:cad9924073039ee9a7d578d67bcfb45ec8557745
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
+        - plugins/sprint-orchestrator/agents/dev.md
+        - plugins/sprint-orchestrator/scripts/e2e.ts
     notes: >
       During hardening, the dev subagent stalled mid-research on 3 of 5 stories. Each needed 2–3
       spawns because the dev would reach a decision point and return early instead of finishing. Two
