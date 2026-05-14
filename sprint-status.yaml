@@ -76,7 +76,7 @@ stories:
       _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
   - id: "2"
     title: Dev spawn prompt hardening — mandatory tool calls and decide-and-ship directives
-    status: ready
+    status: failed
     depends_on: []
     acceptance_criteria:
       checks:
@@ -100,12 +100,10 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-90219e38-s2-retry
+      claimed_at: 2026-05-14T08:37:20.428Z
       rework_count: 0
       base_branch: main
-      dev_returned_at: 2026-05-14T08:15:11.724Z
-      branch: 2-dev-spawn-prompt-hardening-mandatory-too
-      branch_prepared_by: dev-90219e38-s2
-      branch_prepared_at: 2026-05-14T08:10:07.529Z
       reopen_history:
         - reopened_at: 2026-05-14T08:30:37.320Z
           reason: retry with Opus pinned to dev role — Sonnet 4.6 bailed mid-research with zero commits on
@@ -119,6 +117,12 @@ stories:
             their behalf to unblock the state machine. No basis for a rework retry — the dev did
             nothing.
           reopened_by_agent_id: human-jack
+      dev_returned_at: 2026-05-14T08:15:11.724Z
+      branch: 2-dev-spawn-prompt-hardening-mandatory-too
+      branch_prepared_by: dev-90219e38-s2
+      branch_prepared_at: 2026-05-14T08:10:07.529Z
+      last_failure_reason: "Acceptance criteria failed: shell, shell, shell, shell"
+      failed_at: 2026-05-14T08:37:45.816Z
     notes: >
       During hardening, the dev subagent stalled mid-research on 3 of 5 stories. Each needed 2–3
       spawns because the dev would reach a decision point and return early instead of finishing. Two
