@@ -1,300 +1,186 @@
-sprint_id: orchestrator-hardening-followup
+sprint_id: orchestrator-state-and-shipgate
 schema_version: 1
 stories:
   - id: "1"
-    title: Fix the 5 happy-path e2e regressions surfaced by hardening sprint's ship gate
+    title: Move sprint-status.yaml out of git; run.log as audit trail
     status: done
     depends_on: []
     acceptance_criteria:
       checks:
+        - type: shell
+          cmd: grep -q "\.sprint-orchestrator/state" plugins/sprint-orchestrator/.gitignore
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "state file lives outside git"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "migration from sprint-status.yaml to
+            .sprint-orchestrator/state"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
         - type: shell
           cmd: pnpm --dir plugins/sprint-orchestrator e2e
           expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
     orchestrator:
-      claimed_by: dev-retry2-1747258500
-      claimed_at: 2026-05-14T07:19:21.914Z
-      completed_at: 2026-05-14T07:34:05.285Z
+      claimed_by: dev-90219e38
+      claimed_at: 2026-05-14T11:11:56.512Z
       rework_count: 0
       base_branch: main
-      branch: 1-fix-the-5-happy-path-e2e-regressions-sur
-      branch_prepared_by: dev-retry2-1747258500
-      branch_prepared_at: 2026-05-14T07:19:26.727Z
+      branch: 1-move-sprint-status-yaml-out-of-git-run-l
+      branch_prepared_by: dev-90219e38
+      branch_prepared_at: 2026-05-14T11:12:00.555Z
+      completed_at: 2026-05-14T11:41:29.949Z
+      summary: "State machine moved out of git: canonical state now lives in
+        .sprint-orchestrator/state.yaml (gitignored), all write tools stop creating git commits for
+        state mutations, and every transition is appended to .sprint-orchestrator/run.log as the
+        audit trail."
       artefacts:
-        - git:2c9d001
-        - pr:34
+        - git:3391873e1383788c9f45015b26299df433324249
+        - pr:https://github.com/jackmcintyre/sprint-orchestrator/pull/41
+        - plugins/sprint-orchestrator/__fixtures__/tiny-sprint/.gitignore
+        - plugins/sprint-orchestrator/packages/hooks/src/stop.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/fixtures.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/__tests__/tools.test.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/lib/commit-state.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/lib/run-log.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/state/sprint-status.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/claim-story.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/commit-story-artefacts.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/context.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/get-or-init-config.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-dev-returned.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-complete.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-failed.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/mark-story-needs-rework.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/plan-run-sprint.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/prepare-story-branch.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/record-story-reopen.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/release-stale-claims.ts
+        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/set-config-pr-per-story.ts
         - plugins/sprint-orchestrator/scripts/e2e.ts
-    notes: >
-      Five happy-path e2e assertions broke when the orchestrator-hardening guards landed (PRs
-      #29–#33). The failures were correctly caught by hardening's ship gate (story 6, failed by
-      design per planning-discipline Rule 3). This story retires that failure.
-
-
-      Named failing assertions (from Jack's 2026-05-14 retro):
-
-        1. "two commits per happy-path story" — auto-promotion + commit flow not producing 2
-           commits
-        2. "completed_at and status=done after happy path" — story ends in_progress, not done
-           (two variants of this assertion)
-        3. "auto-promotion: backlog story with done dep returned by getReadyStories" — dependency
-           promotion not firing
-        4. "auto-promoted story B finishes with status=done" — story B stays in backlog
-        5. "branch-per-story: dependent story's branch is rooted at dep tip" — hardening Story 3's
-           dependency-rooted-base fix not wiring through to full happy-path scenario
-
-
-      LIKELY ROOT CAUSES (dev should audit before fixing):
-
-        - The e2e happy-path harness does not call markDevReturned between dev work and reviewer
-          eval. Hardening Story 1's guard (recordStoryFailure / validateAcceptanceCriteria refuses
-          without dev_returned_at) then refuses the eval, causing the cascade.
-
-        - The push-gate from hardening Story 4 fires before the e2e fixture pushes the branch.
-
-        - The auto-promotion path may not trigger markDevReturned either, leaving promoted stories'
-          guards un-set.
-
-
-      CONCRETE ACTIONS:
-
-        - Audit plugins/sprint-orchestrator/scripts/e2e.ts and any shared fixtures. Identify where
-          dev work completes vs where reviewer eval starts.
-
-        - Insert markDevReturned (or equivalent — depends on what hardening Story 1 actually
-          landed) at the right hand-off point in the fixtures.
-
-        - For push-gate failures: either bypass via pr_per_story: false in fixtures that aren't
-          testing PR behaviour, OR add a real push step where the test IS exercising PR flow.
-
-        - Re-run pnpm e2e. Confirm all 5 named assertions pass. Spot-check the rest of the suite
-          for any collateral regressions.
-
-
-      Full developer context in
-      _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
-  - id: "2"
-    title: Dev spawn prompt hardening — mandatory tool calls and decide-and-ship directives
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: test -f
-            plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q MANDATORY_TOOL_CALL_DIRECTIVE
-            plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q DECIDE_AND_SHIP_DIRECTIVE
-            plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "agents/dev.md contains mandatory tool-call
-            and decide-and-ship directives verbatim"
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-90219e38-s2-recover2
-      claimed_at: 2026-05-14T08:52:40.575Z
-      completed_at: 2026-05-14T08:54:17.242Z
-      summary: Shipped dev-agent-behavioural-directives.ts with MANDATORY_TOOL_CALL_DIRECTIVE and
-        DECIDE_AND_SHIP_DIRECTIVE constants, injected both into agents/dev.md, and added a
-        phrase-lock e2e test; all 5 ACs pass (build, typecheck, lint, unit tests, e2e).
-      rework_count: 0
-      base_branch: main
-      reopen_history:
-        - reopened_at: 2026-05-14T08:30:37.320Z
-          reason: retry with Opus pinned to dev role — Sonnet 4.6 bailed mid-research with zero commits on
-            initial attempt
-          prior_status: failed
-          prior_failure_reason: Dev produced no new code on this swing. Zero commits on branch
-            2-dev-spawn-prompt-hardening-mandatory-too vs main; working tree only contains
-            sprint-status.yaml orchestrator bookkeeping. Target file
-            plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
-            does not exist. Dev also never called markDevReturned, which the reviewer had to call on
-            their behalf to unblock the state machine. No basis for a rework retry — the dev did
-            nothing.
-          reopened_by_agent_id: human-jack
-        - reopened_at: 2026-05-14T08:50:45.920Z
-          reason: spurious failure — prepareStoryBranch stale-base path side-effected status=failed before dev
-            ran; dev work shipped cleanly (commit cad9924) with all ACs green
-          prior_status: failed
-          prior_failure_reason: "Acceptance criteria failed: shell, shell, shell, shell"
-          reopened_by_agent_id: human-jack
-      dev_returned_at: 2026-05-14T08:53:10.387Z
-      branch: 2-dev-spawn-prompt-hardening-mandatory-too
-      branch_prepared_by: dev-90219e38-s2-retry
-      branch_prepared_at: 2026-05-14T08:43:46.735Z
-      artefacts:
-        - git:cad9924073039ee9a7d578d67bcfb45ec8557745
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
-        - plugins/sprint-orchestrator/agents/dev.md
-        - plugins/sprint-orchestrator/scripts/e2e.ts
-    notes: >
-      During hardening, the dev subagent stalled mid-research on 3 of 5 stories. Each needed 2–3
-      spawns because the dev would reach a decision point and return early instead of finishing. Two
-      patterns observed:
-
-
-        1. Required tool calls buried in story notes were skipped — markDevReturned was described
-           in notes but not surfaced as an explicit task. Devs didn't call it.
-
-        2. Devs reached decision points and returned early — when a story required choosing between
-           two viable implementation approaches, the dev returned with a question instead of
-           picking one and shipping.
-
-
-      Same pattern as the deferred no-clarifying-questions follow-up. Fix in agents/dev.md system
-      prompt with explicit behavioural contracts.
-
-
-      CONCRETE ACTIONS:
-
-        - New phrase-lock module
-          plugins/sprint-orchestrator/packages/mcp-server/src/tools/dev-agent-behavioural-directives.ts
-          exporting two string constants:
-
-            MANDATORY_TOOL_CALL_DIRECTIVE:
-              "If the story names a specific MCP tool you must call (e.g. `markDevReturned`),
-              call it as part of completing the story. Do not return without calling it."
-
-            DECIDE_AND_SHIP_DIRECTIVE:
-              "When a story has a decision point with multiple viable approaches, pick one and
-              ship. Do not return to ask the PM unless the spec is genuinely ambiguous (missing
-              field names, contradictory ACs, no way to satisfy the AC). 'Could this be done
-              better?' is not ambiguity — it's a design judgment the dev owns."
-
-        - Add both directives to agents/dev.md, near the top of the system prompt section, as
-          a labelled block: "Behavioural directives (do not skip)."
-
-        - New e2e mini-run with grep tag
-          "agents/dev.md contains mandatory tool-call and decide-and-ship directives verbatim"
-          — loads both constants, loads agents/dev.md as a string, asserts both appear verbatim.
-          Phrase-lock pattern, identical shape to existing RESOLVE_SPAWN_MODEL_INSTRUCTION check.
-
-
-      MANUAL SUCCESS TARGET (recorded by reviewer, validated over time):
-        Over the next 2 sprints, no story should require >1 dev spawn purely due to mid-research
-        stalls or skipped mandatory tool calls. This is a directional metric, not an AC.
-
-
-      Full developer context in
-      _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
-
-
-      Note: this story also touches the deferred dev-spawn-no-questions follow-up
-      (`feedback-dev-spawn-no-questions` in memory). If the dev finds it cheap to add a third "no
-      clarifying questions" directive in the same module, they should — surface in the
-      implementation summary so the reviewer can decide whether to expand scope or defer.
-  - id: "3"
-    title: run-sprint refuses to launch with uncommitted sprint-status.yaml
-    status: done
-    depends_on: []
-    acceptance_criteria:
-      checks:
-        - type: shell
-          cmd: grep -qE "git status|uncommitted|dirty" plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
-          expect_exit: 0
-        - type: shell
-          cmd: grep -rq UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools
-          expect_exit: 0
-        - type: shell
-          cmd: grep -q "Commit sprint-status.yaml" _bmad-output/planning-artifacts/planning-discipline.md
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "run-sprint refuses when sprint-status.yaml
-            has uncommitted changes"
-          expect_exit: 0
-        - type: shell
-          cmd: pnpm --dir plugins/sprint-orchestrator verify
-          expect_exit: 0
-    orchestrator:
-      claimed_by: dev-ade78844-s3
-      claimed_at: 2026-05-14T10:07:53.020Z
-      rework_count: 1
-      last_review_feedback: "AC #2 is a planning-discipline Rule 4 violation — the shell command `grep -q
-        UNCOMMITTED_BACKLOG_REFUSAL plugins/sprint-orchestrator/packages/mcp-server/src/tools` exits
-        2 because grep refuses to search a directory without the -r flag. The constant
-        UNCOMMITTED_BACKLOG_REFUSAL is correctly implemented in run-sprint-preflight-phrases.ts (the
-        new file under that directory), and all other ACs pass (SKILL.md update,
-        planning-discipline.md rule, e2e 3/3, pnpm verify 127 tests). Fix required: change AC #2 cmd
-        to either `grep -rq UNCOMMITTED_BACKLOG_REFUSAL
-        plugins/sprint-orchestrator/packages/mcp-server/src/tools` OR `grep -q
-        UNCOMMITTED_BACKLOG_REFUSAL
-        plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-preflight-phrases.ts`.
-        Do not change any implementation — only the acceptance criterion shell command needs
-        repair."
-      last_review_at: 2026-05-14T09:07:00.771Z
-      base_branch: main
-      reopen_history:
-        - reopened_at: 2026-05-14T09:26:48.233Z
-          reason: "story 3's persist-3-completion commit (9325c5c) didn't make it onto PR #36 before merge;
-            work is genuinely shipped, this is bookkeeping recovery"
-          prior_status: failed
-          prior_failure_reason: "Acceptance criteria failed: shell"
-          reopened_by_agent_id: human-jack
-      dev_returned_at: 2026-05-14T10:04:56.139Z
-      branch: 3-run-sprint-refuses-to-launch-with-uncomm
-      branch_prepared_by: dev-ade78844-s3
-      branch_prepared_at: 2026-05-14T10:03:55.547Z
-      completed_at: 2026-05-14T10:08:14.175Z
-      summary: "run-sprint preflight check now refuses to launch when sprint-status.yaml has uncommitted
-        changes, enforced via phrase-locked UNCOMMITTED_BACKLOG_REFUSAL constant, with SKILL.md
-        pre-flight step, planning-discipline.md rule, and 3/3 e2e assertions passing; AC #2 grep
-        flag corrected from -q to -rq."
-      artefacts:
-        - git:9f256fc
-        - sprint-status.yaml
         - plugins/sprint-orchestrator/skills/run-sprint/SKILL.md
-        - plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-preflight-phrases.ts
-        - _bmad-output/planning-artifacts/planning-discipline.md
+        - plugins/sprint-orchestrator/.gitignore
     notes: >
-      During the hardening sprint launch, sprint-status.yaml was never committed. When PR #29 merged
-      to main, the merge overwrote the live backlog file. Manual recovery from a dangling git blob
-      was scrappy and one-off; an external user hitting this would lose their backlog with no
-      recovery path.
+      Problem: sprint-status.yaml committed to per-story branch on every state mutation produces B4
+      (claim/read race), B5 (auto-merge orphans), B6 (per-branch divergence). State machine is
+      workspace-scoped but git forces it branch-scoped.
 
 
-      CONCRETE ACTIONS:
+      Concrete actions:
 
-        - Edit plugins/sprint-orchestrator/skills/run-sprint/SKILL.md. Add a pre-flight step
-          (step 0 or step 1, before any other action): run `git status --porcelain` against the
-          configured sprintStatusPath. If non-empty, refuse with a clear message.
+      - Move canonical state file to .sprint-orchestrator/state.yaml (or .json — dev picks). Keep
+      schema identical.
 
-        - Phrase-lock the refusal message via a new TS constant UNCOMMITTED_BACKLOG_REFUSAL.
-          Module home: either a new phrase-lock module
-          (plugins/sprint-orchestrator/packages/mcp-server/src/tools/run-sprint-preflight-phrases.ts)
-          OR fold into the existing run-sprint-output-format.ts. Decide during implementation;
-          lean toward existing module for cohesion.
+      - Add .sprint-orchestrator/state.* to .gitignore. Idempotent migration: if old
+      sprint-status.yaml exists at repo root AND new state file does not, move it; leave deprecation
+      note pointing to new location.
 
-        - Promote to planning-discipline.md as a new rule. Suggested text:
-            "Commit sprint-status.yaml before launching a sprint. Story PRs that merge to main
-            mid-run will otherwise overwrite live backlog state, requiring manual recovery."
-          This is a planning-discipline rule (2026-05-14 retro lesson) AND a mechanical
-          enforcement (skill refusal). Both layers reinforce.
+      - Rewrite all MCP write tools (claimStory, markDevReturned, recordStorySuccess,
+      recordStoryFailure, recordStoryRework, recordStoryReopen, releaseStaleClaims,
+      prepareStoryBranch, setConfigPrPerStory) to read/write new location AND STOP creating git
+      commits for state mutations. The `chore(sprint): persist <id> <transition>` commit pattern
+      goes away entirely.
 
-        - New e2e mini-run with grep tag
-          "run-sprint refuses when sprint-status.yaml has uncommitted changes" — sets up a temp
-          git repo, writes a sprint-status.yaml WITHOUT committing, invokes the skill's
-          pre-flight check (or its extracted helper), asserts the refusal fires with the
-          phrase-locked message.
+      - Every state mutation appends to .sprint-orchestrator/run.log with full detail (story_id,
+      transition, agent_id, timestamp, reason if applicable).
+
+      - commitStoryArtefacts keeps committing dev's actual code changes only. State updates no
+      longer ride along.
+
+      - skills/run-sprint/SKILL.md pre-flight UNCOMMITTED_BACKLOG_REFUSAL check becomes obsolete;
+      replace with migration prompt OR remove cleanly.
+  - id: "2"
+    title: Reviewer empty-commit on zero-diff ship-gate stories (B8 fix)
+    status: ready
+    depends_on:
+      - "1"
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: grep -rq SHIP_GATE_EMPTY_COMMIT_MESSAGE_PREFIX
+            plugins/sprint-orchestrator/packages/mcp-server/src/tools
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "zero-diff story under pr_per_story=true
+            successfully opens a PR via empty commit"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    orchestrator:
+      rework_count: 0
+    notes: >
+      Problem: verification-only stories make zero commits. gh pr create returns "No commits between
+      main and the story branch", no PR opens, state machine refuses recordStorySuccess. Every
+      sprint's final ship-gate story fails for this structural reason.
 
 
-      The third AC check above (grep planning-discipline.md) is the planning-discipline rule
-      addition. The second AC check (grep packages/mcp-server/src/tools) covers either module home
-      option — the constant must exist somewhere under packages/mcp-server/src/tools.
+      Concrete actions:
+
+      - In reviewer flow (agents/reviewer.md OR commitStoryArtefacts MCP tool — dev decides), detect
+      zero diff vs base AFTER dev returns. If zero diff: `git commit --allow-empty -m
+      "chore(ship-gate): <story-id> verification only — see sprint state for AC results"` before
+      push.
+
+      - Phrase-lock the empty-commit message via new constant SHIP_GATE_EMPTY_COMMIT_MESSAGE_PREFIX.
+      Module home: existing reviewer-related module if any, else new ship-gate-phrases.ts under
+      plugins/sprint-orchestrator/packages/mcp-server/src/tools/.
+
+      - Trigger is structural (zero commits) not name-based.
+  - id: "3"
+    title: Auto-clean stale per-story branches on prepareStoryBranch and recordStoryFailure (B9 fix)
+    status: ready
+    depends_on:
+      - "1"
+      - "2"
+    acceptance_criteria:
+      checks:
+        - type: shell
+          cmd: grep -rq STALE_BRANCH_HAS_REAL_WORK_REFUSAL
+            plugins/sprint-orchestrator/packages/mcp-server/src/tools
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "prepareStoryBranch auto-cleans stale
+            bookkeeping-only branch"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "prepareStoryBranch refuses to delete branch
+            with real feat/fix commits"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator e2e --grep "recordStoryFailure cleans up local and
+            remote per-story branches"
+          expect_exit: 0
+        - type: shell
+          cmd: pnpm --dir plugins/sprint-orchestrator verify
+          expect_exit: 0
+    orchestrator:
+      rework_count: 0
+    notes: >
+      Problem: stale local and remote branches from prior failed runs block prepareStoryBranch with
+      "fatal: a branch named '<id>-<slug>' already exists". Today required 3 human approval prompts
+      on a single story.
 
 
-      Full developer context in
-      _bmad-output/planning-artifacts/brief-orchestrator-hardening-followup.md.
+      Concrete actions:
+
+      - prepareStoryBranch pre-flight: if local branch with target name exists, inspect commits vs
+      configured default_base. If all commits are orchestrator bookkeeping (`chore(sprint):...`) or
+      pure ship-gate empty commits (post-Story 2), delete and recreate. If any `feat(<id>):` or
+      `fix(<id>):` commit exists, refuse with clear message saying branch contains unmerged work —
+      do not auto-delete.
+
+      - Same logic for remote — fetch first, inspect, delete if bookkeeping-only, refuse if real
+      work.
+
+      - recordStoryFailure deletes both local and remote per-story branches UNLESS story has merged
+      PR artefacts on it (safety net). On reopen, branch is recreated fresh.
+
+      - Phrase-lock refusal messages via new constant STALE_BRANCH_HAS_REAL_WORK_REFUSAL.
   - id: "4"
-    title: Ship gate — pnpm e2e + pnpm verify green + manual pr_per_story=true smoketest
+    title: Ship gate
     status: ready
     depends_on:
       - "1"
@@ -311,38 +197,21 @@ stories:
     orchestrator:
       rework_count: 0
     notes: >
-      Verification-only ship gate per planning-discipline Rule 3. Mechanical gates checked above.
+      Verification-only. Tests B8 fix BY BEING zero-diff under pr_per_story=true. Depends on 1, 2,
+      3.
 
 
-      MANUAL gate: Jack runs a small 2-3 story sprint with pr_per_story=true — the same conditions
-      that broke the hardening sprint's ship gate — and confirms:
+      Manual smoketest (recorded in reviewer summary):
 
+      1. State file at .sprint-orchestrator/state.yaml, gitignored, NOT in git status after
+      mutation.
 
-        1. No spurious failures pre-implementation (hardening Story 1 verified live).
+      2. `git log sprint-status.yaml` returns nothing on fresh sprint.
 
-        2. Any failure has structured details visible in sprint-status.yaml (hardening Story 2
-           verified live).
+      3. Small 2-story sprint with pr_per_story=true drains cleanly, no human approvals for branch
+      cleanup mid-run.
 
-        3. Story N+1's branch correctly roots off Story N's tip; separate PR per story, no collapse
-           (hardening Story 3 verified live).
+      4. Ship gate (this story) reaches done — proves B8 fixed.
 
-        4. Reviewer can't mark a story `done` if it forgot to push the branch — state machine
-           refuses cleanly (hardening Story 4 verified live).
-
-        5. Dev subagents complete in 1 spawn per story (this sprint's Story 2 verified live).
-
-        6. run-sprint refuses cleanly when sprint-status.yaml is dirty (this sprint's Story 3
-           verified live).
-
-
-      Manual smoketest result (pass/fail + notes per the 6 checks above) is recorded in the reviewer
-      summary before recordStorySuccess. If any check fails, route rework to the offending story
-      (1-3 from this sprint OR back to hardening if a hardening guard misbehaves), NOT to this ship
-      gate.
-
-
-      ONCE THIS SHIP GATE PASSES:
-        - The orchestrator-hardening sprint's failed story 6 is retired (Phase 1 complete per
-          roadmap.md).
-        - Phase 2 (inter-agent comms plumbing) can begin.
-        - Sprint mode is clean enough to be the dog-fooding substrate for building continuous flow.
+      5. Interrupt mid-flight (Ctrl-C after claimStory before reviewer), re-launch — next run clears
+      stuck in_progress via releaseStaleClaims cleanly, no branch debris.
