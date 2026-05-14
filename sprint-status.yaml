@@ -195,11 +195,11 @@ stories:
       claimed_by: dev-2026-05-14-s4
       claimed_at: 2026-05-14T03:47:00.679Z
       rework_count: 0
+      base_branch: main
+      base_branch_fallback_reason: dep 1's branch '1-acs-only-evaluate-after-the-dev-subagent' no longer exists locally
       branch: 4-recordstorysuccess-refuses-without-a-pus
       branch_prepared_by: dev-2026-05-14-s4
       branch_prepared_at: 2026-05-14T03:47:05.184Z
-      base_branch: main
-      base_branch_fallback_reason: dep 1's branch '1-acs-only-evaluate-after-the-dev-subagent' no longer exists locally
     notes: >
       Prose-level instruction in agents/reviewer.md does not reliably make the reviewer push the
       branch before calling gh pr create. Confirmed empirically — Jack added the instruction after
@@ -244,7 +244,7 @@ stories:
         shim for gh — see the dev notes during implementation.
   - id: "5"
     title: Document recordStoryReopen as the manual-override recovery path
-    status: ready
+    status: in_progress
     depends_on:
       - "1"
       - "2"
@@ -264,7 +264,15 @@ stories:
           cmd: pnpm --dir plugins/sprint-orchestrator verify
           expect_exit: 0
     orchestrator:
+      claimed_by: dev-2026-05-14-s5
+      claimed_at: 2026-05-14T03:54:41.237Z
       rework_count: 0
+      branch: 5-document-recordstoryreopen-as-the-manual
+      branch_prepared_by: dev-2026-05-14-s5
+      branch_prepared_at: 2026-05-14T03:54:44.416Z
+      dev_returned_at: 2026-05-14T13:59:00.000Z
+      base_branch: main
+      base_branch_fallback_reason: dep 1's branch '1-acs-only-evaluate-after-the-dev-subagent' no longer exists locally
     notes: >
       recordStoryReopen already exists as an MCP tool but its semantics, when-to-use guidance, and
       user-facing surface are undocumented. When the orchestrator state gets wedged, the user has no

@@ -30,6 +30,7 @@ export async function recordStoryReopen(
   ctx: ToolContext,
   storyId: string,
   reason: string,
+  reopenedByAgentId?: string,
 ): Promise<RecordStoryReopenResult> {
   const reopened_at = new Date().toISOString();
   const result = await updateSprintStatus(ctx.sprintStatusPath, async (state) => {
@@ -57,6 +58,7 @@ export async function recordStoryReopen(
         reason,
         prior_status: "failed" as const,
         ...(priorFailureReason !== undefined ? { prior_failure_reason: priorFailureReason } : {}),
+        ...(reopenedByAgentId !== undefined ? { reopened_by_agent_id: reopenedByAgentId } : {}),
       },
     ];
 

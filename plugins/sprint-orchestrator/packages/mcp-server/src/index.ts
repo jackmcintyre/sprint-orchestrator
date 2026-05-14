@@ -203,10 +203,17 @@ export function buildServer(ctx: ToolContext = defaultContext()): McpServer {
       title: "Record story reopen",
       description:
         "Transition a failed story back to ready so the orchestrator picks it up again. Clears failed_at, last_failure_reason, claimed_by, claimed_at. Preserves rework_count for audit. Appends an entry to orchestrator.reopen_history. Refuses if status != failed. For human (or future supervisor agent) recovery — the automated reviewer never calls this.",
-      inputSchema: { storyId: z.string(), reason: z.string().min(1) },
+      inputSchema: {
+        storyId: z.string(),
+        reason: z.string().min(1),
+        reopenedByAgentId: z
+          .string()
+          .optional()
+          .describe("Agent or user ID calling the reopen (persisted to reopen_history for audit)."),
+      },
     },
-    async ({ storyId, reason }) => {
-      const result = await recordStoryReopen(ctx, storyId, reason);
+    async ({ storyId, reason, reopenedByAgentId }) => {
+      const result = await recordStoryReopen(ctx, storyId, reason, reopenedByAgentId);
       return json({ ok: true, ...result });
     },
   );

@@ -1425,6 +1425,123 @@ async function runRecordStoryReopenMiniRun(): Promise<AssertionOutcome[]> {
 }
 
 /**
+ * Mini-run: recordStoryReopen persists reopened_by_agent_id in reopen_history.
+ *
+ * Drives a story to `failed`, calls recordStoryReopen with a reopenedByAgentId,
+ * and asserts:
+ *   - status transitions failed → ready
+ *   - last_failure_reason cleared
+ *   - failure_details cleared
+ *   - reopen_history[].length grows by 1
+ *   - the new entry carries prior_failure_reason and reopened_by_agent_id
+ *
+ * Grep tag: "recordStoryReopen resets a failed story to ready and persists the reopen event"
+ */
+async function runRecordStoryReopenAuditMiniRun(): Promise<AssertionOutcome[]> {
+  const root = await setupTempRepo();
+  const ctx = makeContext(root);
+
+  const configDir = path.join(root, ".sprint-orchestrator");
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "config.yaml"),
+    [
+      "sprintStatusPath: sprint-status.yaml",
+      "autoDetected: false",
+      'layout: "custom"',
+      "pr_per_story: false",
+      'default_base: "main"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const agent = "agent-reopen-audit-driver";
+  const outcomes: AssertionOutcome[] = [];
+
+  try {
+    // Drive story C to failed.
+    const claim = await claimStory(ctx, "C", agent);
+    if (!claim.claimed) throw new Error(`could not claim C: holder=${claim.holder ?? "?"}`);
+
+    await markDevReturned(ctx, "C", agent);
+    await markStoryFailed(ctx, "C", "forced failure for audit test");
+
+    const failedState = await readSprintStatus(ctx.sprintStatusPath);
+    const failedC = failedState.stories.find((s) => s.id === "C");
+    if (!failedC || failedC.status !== "failed") {
+      throw new Error(`expected C status=failed before reopen, got ${String(failedC?.status)}`);
+    }
+
+    const historyBefore = Array.isArray(
+      (failedC.orchestrator as Record<string, unknown>).reopen_history,
+    )
+      ? ((failedC.orchestrator as Record<string, unknown>).reopen_history as unknown[])
+      : [];
+    const lengthBefore = historyBefore.length;
+
+    // Reopen with an explicit agent ID.
+    const reopenAgentId = "supervisor-agent-001";
+    await recordStoryReopen(ctx, "C", "audit trail test", reopenAgentId);
+
+    const finalState = await readSprintStatus(ctx.sprintStatusPath);
+    const storyC = finalState.stories.find((s) => s.id === "C");
+
+    const checks: Assertion[] = [
+      {
+        name: "recordStoryReopen resets a failed story to ready and persists the reopen event",
+        run: () => {
+          expect(!!storyC, "story C missing from final state");
+          expect(
+            storyC!.status === "ready",
+            `story C status=${storyC!.status} (expected "ready" after reopen)`,
+          );
+          const orch = storyC!.orchestrator as Record<string, unknown>;
+          expect(
+            orch.last_failure_reason === undefined,
+            `last_failure_reason not cleared: ${String(orch.last_failure_reason)}`,
+          );
+          expect(
+            orch.failure_details === undefined,
+            `failure_details not cleared: ${JSON.stringify(orch.failure_details)}`,
+          );
+          const history = orch.reopen_history as Array<Record<string, unknown>> | undefined;
+          expect(Array.isArray(history), "reopen_history missing or not an array");
+          expect(
+            history!.length === lengthBefore + 1,
+            `reopen_history length expected ${lengthBefore + 1}, got ${history!.length}`,
+          );
+          const entry = history![history!.length - 1]!;
+          expect(
+            entry.prior_failure_reason === "forced failure for audit test",
+            `prior_failure_reason=${String(entry.prior_failure_reason)} (expected "forced failure for audit test")`,
+          );
+          expect(
+            entry.reopened_by_agent_id === reopenAgentId,
+            `reopened_by_agent_id=${String(entry.reopened_by_agent_id)} (expected "${reopenAgentId}")`,
+          );
+        },
+      },
+    ];
+
+    for (const a of checks) {
+      try {
+        await a.run();
+        outcomes.push({ name: a.name, passed: true });
+        console.log(`  PASS  ${a.name}`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        outcomes.push({ name: a.name, passed: false, error: msg });
+        console.log(`  FAIL  ${a.name}\n        ${msg}`);
+      }
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+  return outcomes;
+}
+
+/**
  * Mini-run for story 4: lintSprint must flag shell `cmd` fields that would
  * break YAML.parse if dumped unquoted (e.g. unquoted apostrophe + colon
  * inside a `--grep "x: y"` arg). The fixture sprint here writes such a cmd
@@ -3236,6 +3353,16 @@ async function main(): Promise<number> {
     console.log("[e2e] mini-run: recordStoryReopen recovery from failed");
     const reopenOutcomes = await runRecordStoryReopenMiniRun();
     outcomes.push(...reopenOutcomes);
+  }
+
+  // recordStoryReopen audit mini-run: reopened_by_agent_id persisted in reopen_history.
+  if (
+    !filter ||
+    filter.test("recordStoryReopen resets a failed story to ready and persists the reopen event")
+  ) {
+    console.log("[e2e] mini-run: recordStoryReopen audit — reopened_by_agent_id persisted");
+    const reopenAuditOutcomes = await runRecordStoryReopenAuditMiniRun();
+    outcomes.push(...reopenAuditOutcomes);
   }
 
   // Eighth mini-run (story 4): lintSprint flags shell cmd fields whose string

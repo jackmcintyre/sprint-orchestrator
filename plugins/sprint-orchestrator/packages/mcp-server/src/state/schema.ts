@@ -80,6 +80,8 @@ export const OrchestratorMeta = z
             reason: z.string().min(1),
             prior_status: z.literal("failed"),
             prior_failure_reason: z.string().optional(),
+            /** Agent or user identifier that called recordStoryReopen. Optional — omitted when the caller is anonymous. */
+            reopened_by_agent_id: z.string().optional(),
           })
           .passthrough(),
       )

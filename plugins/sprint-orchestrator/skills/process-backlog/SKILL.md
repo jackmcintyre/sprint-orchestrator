@@ -42,6 +42,16 @@ Repeat until either `getReadyStories` returns `[]` or you have completed **5 sto
    - `blocked: <id> — state-machine rejected <toolName>: <error>` — **hard stop for the entire run.** The reviewer attempted a state-mutation call (`recordStorySuccess` / `recordStoryRework` / `recordStoryFailure`) and the MCP server rejected it, which means the orchestrator's bookkeeping is in a state this run cannot safely reconcile (typically: the story was moved out from under us between claim and review). Surface the line prominently to the user via `appendRunLog` with `event: "blocked"` (carry `story_id`, `tool`, and the verbatim `error`), write a one-line run summary that includes the blocked line, and STOP. Do not pick up the next ready story — the same bookkeeping drift likely affects others, and continuing would compound the problem. The user must investigate (`sprint-status.yaml`, `.sprint-orchestrator/run.log`) before re-invoking.
 8. Loop.
 
+## Recovering a spuriously-failed story
+
+If a story lands in `failed` and the failure looks suspicious — the reviewer returned an error unrelated to the implementation (network blip, transient tool rejection, state-machine collision), or the dev made genuine progress but the run was interrupted — a human can reopen it without starting over. Call `recordStoryReopen` with the story ID and a brief reason:
+
+```
+recordStoryReopen(storyId: "S1", reason: "transient tool error, retry warranted", reopenedByAgentId: "human-jack")
+```
+
+This transitions the story from `failed` back to `ready`, clears `failed_at` / `last_failure_reason` / stale claim fields, and appends an auditable entry to `orchestrator.reopen_history` (preserving `prior_failure_reason` and the optional `reopened_by_agent_id`). `rework_count` is kept intact so the next reviewer can see the prior attempt history. The mutation is committed as `chore(sprint): reopen <id> — <reason>`. The tool refuses on any non-`failed` status — for stuck `in_progress` claims use `releaseStaleClaims` instead.
+
 ## Rules
 
 - One story at a time in v1 (sequential, MAX=1 concurrency).
