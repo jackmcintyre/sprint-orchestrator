@@ -1,7 +1,25 @@
+import { spawnSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { readStdinJson, writeJson } from "./lib/io.js";
 import { decideBash, decideUrl, decideWrite, type ToolDecision } from "./lib/deny-patterns.js";
+
+/**
+ * True iff `git check-ignore --quiet <absolutePath>` returns 0 — i.e. the
+ * path is gitignored by an enclosing git repo. The shell-out is run with the
+ * path's parent directory as cwd so the right `.git` is discovered even when
+ * the projectRoot is a sibling worktree of the path's actual repo. Any other
+ * exit code (1 = not ignored, 128 = no enclosing repo) returns false, which
+ * preserves the strict refusal.
+ */
+export function isGitignoredPath(absolutePath: string): boolean {
+  const parent = path.dirname(absolutePath);
+  const r = spawnSync("git", ["check-ignore", "--quiet", "--", absolutePath], {
+    cwd: parent,
+    encoding: "utf8",
+  });
+  return r.status === 0;
+}
 
 export interface PreToolUseInput {
   cwd?: string;
@@ -43,7 +61,11 @@ export async function handlePreToolUse(input: PreToolUseInput | null): Promise<D
 
 export async function evaluate(
   input: PreToolUseInput,
-  ctx: { projectRoot: string; allowedDomains: string[] },
+  ctx: {
+    projectRoot: string;
+    allowedDomains: string[];
+    isGitignored?: (absolutePath: string) => boolean;
+  },
 ): Promise<ToolDecision> {
   const { tool_name, tool_input } = input;
   if (!tool_input) return { allow: true };
@@ -61,7 +83,10 @@ export async function evaluate(
         (typeof tool_input.path === "string" && tool_input.path) ||
         "";
       if (!target) return { allow: true };
-      return decideWrite(target, { projectRoot: ctx.projectRoot });
+      return decideWrite(target, {
+        projectRoot: ctx.projectRoot,
+        isGitignored: ctx.isGitignored ?? isGitignoredPath,
+      });
     }
     case "WebFetch":
     case "WebSearch": {

@@ -28,6 +28,20 @@ export interface DenyOptions {
    * Hosts permitted for WebFetch / WebSearch. Empty means deny all.
    */
   allowedDomains?: string[];
+  /**
+   * Optional predicate: given an absolute path, return true if the path is
+   * gitignored by some enclosing git repository. When supplied, `decideWrite`
+   * will allow writes to paths that would otherwise be refused as escaping
+   * the project root, provided the path is gitignored. This exemption keeps
+   * the gate strict for tracked files (a worktree session still cannot
+   * pollute the shared checkout) while letting background-session orchestrator
+   * runs write local-only planning artifacts (e.g. files under a gitignored
+   * `_bmad-output/`) without a worktree dance.
+   *
+   * The predicate is injected so the pure path logic stays unit-testable;
+   * the production wiring calls `git check-ignore --quiet <path>`.
+   */
+  isGitignored?: (absolutePath: string) => boolean;
 }
 
 export type ToolDecision = { allow: true } | { allow: false; reason: string };
@@ -53,6 +67,14 @@ export function decideWrite(targetPath: string, opts: DenyOptions): ToolDecision
   const resolved = path.resolve(projectRoot, targetPath);
   const relative = path.relative(projectRoot, resolved);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    // Path escapes the project root. Normally refuse — but if a gitignored
+    // predicate is supplied AND it confirms the target is gitignored by an
+    // enclosing git repo, allow the write. The exemption is intentionally
+    // narrow: tracked files outside the project root remain refused, which
+    // protects the shared checkout from background-session pollution.
+    if (opts.isGitignored && opts.isGitignored(resolved)) {
+      return { allow: true };
+    }
     return { allow: false, reason: `path-escape:${targetPath}` };
   }
   return { allow: true };

@@ -72,12 +72,55 @@ describe("decideWrite", () => {
     // /tmp/project-evil/x must NOT be allowed via /tmp/project
     expect(decideWrite("/tmp/project-evil/x", { projectRoot: root }).allow).toBe(false);
   });
+
+  it("allows gitignored paths that escape the project root when isGitignored returns true", () => {
+    // Simulates a background-session in a worktree (`projectRoot=/tmp/project`)
+    // wanting to write a planning artifact under the main checkout's
+    // gitignored `_bmad-output/` (which lives at `/tmp/main/_bmad-output/...`).
+    const r = decideWrite("../main/_bmad-output/foo.md", {
+      projectRoot: root,
+      isGitignored: () => true,
+    });
+    expect(r.allow).toBe(true);
+  });
+
+  it("still denies escaping paths when isGitignored returns false", () => {
+    // Tracked file outside the worktree (e.g. README.md in the main checkout)
+    // must still be refused — the exemption is intentionally narrow.
+    const r = decideWrite("../main/README.md", {
+      projectRoot: root,
+      isGitignored: () => false,
+    });
+    expect(r.allow).toBe(false);
+  });
+
+  it("denies escaping paths when no isGitignored predicate is supplied", () => {
+    // Preserves the original behaviour for callers that don't opt in.
+    expect(decideWrite("../escape.txt", { projectRoot: root }).allow).toBe(false);
+  });
+
+  it("still allows in-root paths regardless of gitignore status", () => {
+    // The exemption only kicks in on the escape path. In-root writes were
+    // already allowed and must remain allowed without consulting git.
+    let called = false;
+    const r = decideWrite("src/foo.ts", {
+      projectRoot: root,
+      isGitignored: () => {
+        called = true;
+        return false;
+      },
+    });
+    expect(r.allow).toBe(true);
+    expect(called).toBe(false);
+  });
 });
 
 describe("decideUrl", () => {
   it("denies everything when allowlist is empty", () => {
     expect(decideUrl("https://github.com", { projectRoot: "/" }).allow).toBe(false);
-    expect(decideUrl("https://github.com", { projectRoot: "/", allowedDomains: [] }).allow).toBe(false);
+    expect(decideUrl("https://github.com", { projectRoot: "/", allowedDomains: [] }).allow).toBe(
+      false,
+    );
   });
 
   it("allows exact-host matches", () => {

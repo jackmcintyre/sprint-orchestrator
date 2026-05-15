@@ -89,6 +89,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { readSprintStatus } from "../packages/mcp-server/src/state/sprint-status.js";
 import { appendRunLog } from "../packages/hooks/src/post-tool-use.js";
+import { evaluate as evaluatePreToolUse } from "../packages/hooks/src/pre-tool-use.js";
 import { handleStop } from "../packages/hooks/src/stop.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -4042,6 +4043,20 @@ async function main(): Promise<number> {
     outcomes.push(...shipGateOutcomes);
   }
 
+  // shipgate-followups sprint, story 3: background-session worktree-isolation
+  // gate exempts gitignored paths so planning artifacts under _bmad-output/
+  // can be written from the shared checkout without a worktree dance.
+  if (
+    !filter ||
+    filter.test("background-session can write to gitignored path without worktree") ||
+    filter.test("background-session still blocks writes to tracked paths outside a worktree") ||
+    filter.test("background-session gitignore")
+  ) {
+    console.log("[e2e] mini-run: background-session gitignore exemption");
+    const gitignoreExemptionOutcomes = await runBackgroundSessionGitignoreExemptionMiniRun();
+    outcomes.push(...gitignoreExemptionOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -5850,6 +5865,158 @@ async function runShipGateEmptyCommitMiniRun(): Promise<AssertionOutcome[]> {
 
 // (bareRemote dirs are mkdtemp'd into os.tmpdir(); leaving them is harmless
 // for the e2e and matches behaviour of other mini-runs that do the same.)
+
+/**
+ * shipgate-followups sprint, story 3: background-session worktree-isolation
+ * gate must exempt gitignored paths so planning artifacts under
+ * `_bmad-output/` can be written directly from a background-session
+ * orchestrator run, without a worktree-then-cp dance.
+ *
+ * Fixture geometry mirrors the real situation: a parent git repo with a
+ * gitignored `_bmad-output/` directory, plus a sibling worktree which the
+ * background session has its cwd in (so projectRoot is the worktree).
+ * Writes to the parent's gitignored path must be allowed; writes to a
+ * tracked file in the parent (README.md) must still be refused.
+ */
+async function runBackgroundSessionGitignoreExemptionMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const main = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-gitignore-"));
+  let worktreeParent: string | null = null;
+  try {
+    const g = (cwd: string, args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
+
+    g(main, ["init", "-q", "--initial-branch=main"]);
+    g(main, ["config", "user.email", "test@example.com"]);
+    g(main, ["config", "user.name", "Test"]);
+    g(main, ["config", "commit.gpgsign", "false"]);
+
+    // Gitignore `_bmad-output/` exactly like the real project does.
+    await fs.writeFile(path.join(main, ".gitignore"), "_bmad-output/\n", "utf8");
+    await fs.writeFile(path.join(main, "README.md"), "# fixture\n", "utf8");
+    g(main, ["add", ".gitignore", "README.md"]);
+    const c1 = g(main, ["commit", "-q", "-m", "init"]);
+    if (c1.status !== 0) throw new Error(`initial commit failed: ${c1.stderr}`);
+
+    // The _bmad-output/ dir must exist on disk so its files can be the
+    // target of a Write. The directory itself isn't tracked.
+    await fs.mkdir(path.join(main, "_bmad-output"), { recursive: true });
+
+    // Stand up a sibling worktree on a story branch. This is what a
+    // background-session orchestrator run gets: cwd inside the worktree,
+    // so projectRoot = worktree path, and parent-checkout paths look like
+    // escapes (`../<main>/_bmad-output/foo.md`).
+    worktreeParent = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-gitignore-wt-"));
+    const worktree = path.join(worktreeParent, "wt");
+    const wt = g(main, ["worktree", "add", "-b", "story-branch", worktree]);
+    if (wt.status !== 0) throw new Error(`worktree add failed: ${wt.stderr}`);
+
+    // Verify the fixture's gitignore semantics: the production helper
+    // resolves git context from the *target's parent directory* (not from
+    // projectRoot), which means it picks up the main checkout's .git for
+    // a `_bmad-output/...` write even when the session's cwd is in a
+    // sibling worktree. Mirror that here so a fixture regression is
+    // diagnosed locally instead of via downstream allow/deny assertions.
+    const ignored = spawnSync(
+      "git",
+      ["check-ignore", "--quiet", "--", path.join(main, "_bmad-output", "foo.md")],
+      { cwd: path.join(main, "_bmad-output"), encoding: "utf8" },
+    );
+    await runOne({
+      name: "background-session gitignore fixture: git check-ignore reports _bmad-output/ as ignored when run from the target's parent dir",
+      run: () => {
+        expect(
+          ignored.status === 0,
+          `expected check-ignore status 0, got ${ignored.status} stderr=${ignored.stderr}`,
+        );
+      },
+    });
+
+    const gitignoredTarget = path.join(main, "_bmad-output", "foo.md");
+    const trackedTarget = path.join(main, "README.md");
+
+    // The two ACs of this story map onto these two assertions. Names match
+    // the --grep filters in the story spec.
+    await runOne({
+      name: "background-session can write to gitignored path without worktree: evaluate allows Write to a gitignored path that escapes projectRoot",
+      run: async () => {
+        const decision = await evaluatePreToolUse(
+          {
+            tool_name: "Write",
+            tool_input: { file_path: gitignoredTarget, content: "x" },
+          },
+          { projectRoot: worktree, allowedDomains: [] },
+        );
+        expect(
+          decision.allow === true,
+          `expected allow=true for gitignored target ${gitignoredTarget}, got ${JSON.stringify(decision)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "background-session still blocks writes to tracked paths outside a worktree: evaluate refuses Write to a tracked file that escapes projectRoot",
+      run: async () => {
+        const decision = await evaluatePreToolUse(
+          {
+            tool_name: "Write",
+            tool_input: { file_path: trackedTarget, content: "x" },
+          },
+          { projectRoot: worktree, allowedDomains: [] },
+        );
+        expect(
+          decision.allow === false,
+          `expected allow=false for tracked target ${trackedTarget}, got ${JSON.stringify(decision)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "background-session gitignore exemption: paths outside any git repo are still refused",
+      run: async () => {
+        // A path that isn't under any git repo (e.g. /tmp/<random>) is
+        // neither tracked nor gitignored — check-ignore returns 128. The
+        // gate must continue to refuse, preserving existing path-escape
+        // behaviour for paths fully outside the project tree.
+        const stray = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-stray-"));
+        try {
+          const decision = await evaluatePreToolUse(
+            {
+              tool_name: "Write",
+              tool_input: { file_path: path.join(stray, "x.txt"), content: "x" },
+            },
+            { projectRoot: worktree, allowedDomains: [] },
+          );
+          expect(
+            decision.allow === false,
+            `expected allow=false for out-of-repo path, got ${JSON.stringify(decision)}`,
+          );
+        } finally {
+          await fs.rm(stray, { recursive: true, force: true });
+        }
+      },
+    });
+  } finally {
+    // Remove the worktree before the parent so git's bookkeeping stays
+    // sane; either way, force-rm cleans up the tmp dirs.
+    if (worktreeParent) await fs.rm(worktreeParent, { recursive: true, force: true });
+    await fs.rm(main, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
 
 async function runPrPerStoryEnforcementMiniRun(): Promise<AssertionOutcome[]> {
   const outcomes: AssertionOutcome[] = [];
