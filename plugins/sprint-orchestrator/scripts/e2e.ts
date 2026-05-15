@@ -3993,6 +3993,20 @@ async function main(): Promise<number> {
     outcomes.push(...devReturnedOutcomes);
   }
 
+  // shipgate-followups sprint, story 1 (deadlock fix): orchestrator itself
+  // calls markDevReturned after the dev Task returns, so a silently-died dev
+  // no longer wedges the state machine. Two grep tags so the AC's two greps
+  // each match.
+  if (
+    !filter ||
+    filter.test("orchestrator marks dev returned even when dev subagent forgot") ||
+    filter.test("recordStoryFailure succeeds when dev produced zero output")
+  ) {
+    console.log("[e2e] mini-run: orchestrator-side markDevReturned backstop");
+    const orchMarksOutcomes = await runOrchestratorMarksDevReturnedMiniRun();
+    outcomes.push(...orchMarksOutcomes);
+  }
+
   // structured-failure-details sprint, story 2: recordStoryFailure persists
   // structured per-check details (cmd, exit_code, expected_exit, stderr, stdout,
   // recorded_at) under orchestrator.failure_details.
@@ -5164,6 +5178,230 @@ async function runDevReturnedGuardMiniRun(): Promise<AssertionOutcome[]> {
         expect(
           validateAllowedAfterReturn,
           "validateAcceptanceCriteria must succeed after markDevReturned — it threw",
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * shipgate-followups sprint, story 1 — orchestrator-side markDevReturned
+ * backstop (deadlock fix).
+ *
+ * The dev subagent is contractually required to call markDevReturned before
+ * returning, but in practice forgets. Without the orchestrator's own call,
+ * every reviewer mutation (recordStorySuccess / recordStoryFailure /
+ * recordStoryRework) is refused by the AC-guard with no API recovery path.
+ *
+ * The fix: the process-backlog skill now calls markDevReturned itself
+ * immediately after the dev Task returns, regardless of summary content.
+ * The dev's own call becomes belt-and-braces (markDevReturned is idempotent
+ * — calling twice just refreshes the timestamp).
+ *
+ * This mini-run simulates the two failure modes the fix must cover:
+ *
+ *   1. "orchestrator marks dev returned even when dev subagent forgot" —
+ *      claim a story, do NOT call markDevReturned as the dev (mimicking a
+ *      silently-died dev subagent), then have the orchestrator call
+ *      markDevReturned itself. Assert dev_returned_at is now set and the
+ *      reviewer mutation goes through cleanly.
+ *
+ *   2. "recordStoryFailure succeeds when dev produced zero output" — same
+ *      setup, then call recordStoryFailure after the orchestrator's
+ *      markDevReturned. Assert the story transitions to `failed` cleanly
+ *      (no deadlock, no DevNotReturnedError).
+ *
+ * Also asserts the idempotency contract: a second markDevReturned call
+ * after the dev's own first call refreshes the timestamp (does not throw,
+ * does not corrupt state).
+ *
+ * Grep tags:
+ *   - "orchestrator marks dev returned even when dev subagent forgot"
+ *   - "recordStoryFailure succeeds when dev produced zero output"
+ */
+async function runOrchestratorMarksDevReturnedMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-orch-marks-dev-returned-"));
+  try {
+    await fs.writeFile(
+      path.join(tmp, "sprint-status.yaml"),
+      [
+        "sprint_id: orch-marks-dev-returned-fixture",
+        "schema_version: 1",
+        "stories:",
+        "  - id: 'D1'",
+        "    title: Dev silently dies story",
+        "    status: ready",
+        "    depends_on: []",
+        "    acceptance_criteria:",
+        "      checks: []",
+        "    orchestrator: {}",
+        "  - id: 'D2'",
+        "    title: Dev calls markDevReturned first story",
+        "    status: ready",
+        "    depends_on: []",
+        "    acceptance_criteria:",
+        "      checks: []",
+        "    orchestrator: {}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: sprint-status.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: false",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, "sprint-status.yaml"),
+      configPath: path.join(configDir, "config.yaml"),
+    };
+
+    // ── Scenario 1: dev forgets to call markDevReturned ──────────────────────
+    const claim1 = await claimStory(ctx, "D1", "agent-orch-d1");
+    if (!claim1.claimed) {
+      outcomes.push({
+        name: "orchestrator marks dev returned even when dev subagent forgot: claim D1",
+        passed: false,
+        error: `could not claim D1: holder=${claim1.holder ?? "?"}`,
+      });
+      return outcomes;
+    }
+
+    // Simulate the dev subagent returning without calling markDevReturned
+    // (no file changes, no commits, no MCP calls). The orchestrator then
+    // calls markDevReturned itself per the new skill prose.
+    const result1 = await markDevReturned(ctx, "D1", "agent-orch-d1");
+
+    await runOne({
+      name: "orchestrator marks dev returned even when dev subagent forgot: dev_returned_at is set after orchestrator call",
+      run: async () => {
+        expect(
+          typeof result1.dev_returned_at === "string" && result1.dev_returned_at.length > 0,
+          `markDevReturned returned no timestamp: ${JSON.stringify(result1)}`,
+        );
+        const state = await readSprintStatus(ctx.sprintStatusPath);
+        const story = state.stories.find((s) => s.id === "D1");
+        expect(!!story, "story D1 missing from state after markDevReturned");
+        expect(
+          typeof story?.orchestrator.dev_returned_at === "string",
+          `D1.orchestrator.dev_returned_at not persisted: got ${JSON.stringify(story?.orchestrator)}`,
+        );
+      },
+    });
+
+    // Now the reviewer call must succeed — this is the deadlock the fix
+    // removes. recordStoryFailure used to refuse with DevNotReturnedError.
+    let failureThrew = false;
+    let failureError = "";
+    let failureResult: { status: string; failed_at: string } | null = null;
+    try {
+      failureResult = await markStoryFailed(ctx, "D1", "dev produced zero output");
+    } catch (err) {
+      failureThrew = true;
+      failureError = (err as Error & { code?: string }).code ?? (err as Error).message;
+    }
+
+    await runOne({
+      name: "recordStoryFailure succeeds when dev produced zero output: no DevNotReturnedError",
+      run: () => {
+        expect(
+          !failureThrew,
+          `recordStoryFailure must not throw after orchestrator's markDevReturned — threw: ${failureError}`,
+        );
+        expect(
+          failureResult?.status === "failed",
+          `expected status=failed, got ${JSON.stringify(failureResult)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "recordStoryFailure succeeds when dev produced zero output: story transitions to failed",
+      run: async () => {
+        const state = await readSprintStatus(ctx.sprintStatusPath);
+        const story = state.stories.find((s) => s.id === "D1");
+        expect(story?.status === "failed", `expected D1.status=failed, got ${story?.status}`);
+        expect(
+          typeof story?.orchestrator.failed_at === "string",
+          `expected D1.orchestrator.failed_at to be set, got ${JSON.stringify(story?.orchestrator)}`,
+        );
+      },
+    });
+
+    // ── Scenario 2: dev calls markDevReturned, orchestrator calls again ─────
+    // (idempotency contract: orchestrator's second call refreshes the
+    // timestamp; does not throw, does not corrupt state.)
+    const claim2 = await claimStory(ctx, "D2", "agent-orch-d2");
+    if (!claim2.claimed) {
+      outcomes.push({
+        name: "orchestrator marks dev returned even when dev subagent forgot: claim D2",
+        passed: false,
+        error: `could not claim D2: holder=${claim2.holder ?? "?"}`,
+      });
+      return outcomes;
+    }
+
+    // Dev calls it first.
+    const devCall = await markDevReturned(ctx, "D2", "agent-orch-d2");
+    // Orchestrator calls it second (a few ms later).
+    await new Promise((r) => setTimeout(r, 5));
+    let secondThrew = false;
+    let secondError = "";
+    let orchCall: { dev_returned_at: string } | null = null;
+    try {
+      orchCall = await markDevReturned(ctx, "D2", "agent-orch-d2");
+    } catch (err) {
+      secondThrew = true;
+      secondError = (err as Error).message;
+    }
+
+    await runOne({
+      name: "orchestrator marks dev returned even when dev subagent forgot: idempotent — second call does not throw",
+      run: () => {
+        expect(
+          !secondThrew,
+          `markDevReturned must be idempotent — second call threw: ${secondError}`,
+        );
+        expect(
+          typeof orchCall?.dev_returned_at === "string",
+          `second markDevReturned returned no timestamp: ${JSON.stringify(orchCall)}`,
+        );
+        // Contract: second call refreshes timestamp (so the orchestrator
+        // call wins, which is what we want — it's the canonical "dev
+        // returned" signal). Documented in skill prose.
+        expect(
+          orchCall != null && orchCall.dev_returned_at >= devCall.dev_returned_at,
+          `second timestamp (${orchCall?.dev_returned_at}) should be >= first (${devCall.dev_returned_at})`,
         );
       },
     });
