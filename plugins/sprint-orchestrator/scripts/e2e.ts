@@ -4085,6 +4085,33 @@ async function main(): Promise<number> {
     outcomes.push(...failCleanOutcomes);
   }
 
+  // shipgate-followups sprint, story 2 (B8 follow-up): end-to-end drain of a
+  // verification-only ship-gate story under pr_per_story=true, all the way
+  // through to recordStorySuccess (NOT just the commit step). This is the
+  // live-path test the prior B8 fix was missing — the original mini-run only
+  // exercised commitStoryArtefacts in isolation, which is why the production
+  // base_branch read miss was not caught.
+  if (!filter || filter.test("ship gate zero-diff story drains end-to-end under pr_per_story")) {
+    console.log("[e2e] mini-run: ship-gate zero-diff end-to-end drain");
+    const drainOutcomes = await runShipGateEndToEndDrainMiniRun();
+    outcomes.push(...drainOutcomes);
+  }
+
+  // shipgate-followups sprint, story 2 (B8 follow-up): the empty-commit
+  // helper must read the base branch from config.default_base, NOT from
+  // story.orchestrator.base_branch. Exercises the helper through the
+  // commitStoryArtefacts public surface with the story-level base_branch
+  // set to a non-existent value — the empty commit should still appear
+  // because the helper trusts config.
+  if (
+    !filter ||
+    filter.test("maybeLayDownShipGateEmptyCommit reads base from config not story state")
+  ) {
+    console.log("[e2e] mini-run: ship-gate helper reads base from config");
+    const baseSrcOutcomes = await runShipGateHelperReadsConfigBaseMiniRun();
+    outcomes.push(...baseSrcOutcomes);
+  }
+
   const failed = outcomes.filter((o) => !o.passed);
   console.log(
     `\n[e2e] ${outcomes.length - failed.length}/${outcomes.length} assertions passed` +
@@ -6117,6 +6144,323 @@ async function runShipGateEmptyCommitMiniRun(): Promise<AssertionOutcome[]> {
 
 // (bareRemote dirs are mkdtemp'd into os.tmpdir(); leaving them is harmless
 // for the e2e and matches behaviour of other mini-runs that do the same.)
+
+/**
+ * shipgate-followups sprint, story 2 (B8 follow-up) — end-to-end drain.
+ *
+ * The original B8 mini-run only proved that commitStoryArtefacts produces an
+ * empty commit in isolation. The bug it was meant to catch (the helper
+ * reading base_branch from story state and short-circuiting to sha:null in
+ * the live reviewer flow) escaped because no test drove the FULL ship-gate
+ * path. This mini-run does:
+ *
+ *   claimStory → prepareStoryBranch → markDevReturned →
+ *   commitStoryArtefacts (must produce empty commit) → push →
+ *   gh shim creates PR → markStoryComplete (must return status=done).
+ *
+ * It uses a real bare-remote origin and a gh shim that returns one open PR
+ * for the per-story branch so the pr_per_story push/PR gates pass. The
+ * critical invariant: the story status ends up `done` with no manual
+ * intervention.
+ *
+ * Grep tag: "ship gate zero-diff story drains end-to-end under pr_per_story".
+ */
+async function runShipGateEndToEndDrainMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-shipgate-e2e-"));
+  const ghShimDir = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-shipgate-e2e-gh-"));
+  const originalPath = process.env.PATH ?? "";
+  try {
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    // Verification-only story: AC always passes, dev produces no diff.
+    const sprintYaml = [
+      "schema_version: 1",
+      "sprint_id: shipgate-e2e-test",
+      "stories:",
+      "  - id: s1",
+      "    title: Verification only ship gate end-to-end",
+      "    status: ready",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: shell",
+      '          cmd: "exit 0"',
+      "          exit_code: 0",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, "state.yaml"), sprintYaml, "utf8");
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".sprint-orchestrator/\n", "utf8");
+    g(["add", ".gitignore"]);
+    g(["commit", "-q", "-m", "init"]);
+
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: .sprint-orchestrator/state.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, ".sprint-orchestrator", "state.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    // Bare remote so push succeeds.
+    const bareRemote = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-shipgate-e2e-origin-"));
+    spawnSync("git", ["init", "--bare", "-q", bareRemote], { encoding: "utf8" });
+    g(["remote", "add", "origin", bareRemote]);
+    g(["push", "-u", "origin", "main"]);
+
+    // gh shim: always reports one OPEN PR for any `pr list --head <branch>`
+    // so markStoryComplete's PR-existence check passes.
+    const ghShim = path.join(ghShimDir, "gh");
+    await fs.writeFile(
+      ghShim,
+      [
+        "#!/usr/bin/env sh",
+        'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
+        '  printf \'[{"number":1,"state":"OPEN"}]\\n\'',
+        "  exit 0",
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${ghShimDir}:${originalPath}`;
+
+    const agent = "agent-shipgate-e2e";
+
+    // Live flow.
+    await claimStory(ctx, "s1", agent);
+    const prep = await prepareStoryBranch(ctx, "s1", agent);
+    // (No dev edit. The story is verification-only.)
+    await markDevReturned(ctx, "s1", agent);
+    const commit = await commitStoryArtefacts(ctx, "s1");
+    // Push the empty commit to origin so the pr_per_story push-gate passes.
+    const push = g(["push", "-u", "origin", prep.branch as string]);
+    const complete = await markStoryComplete(ctx, "s1", agent, "ship-gate verified");
+
+    await runOne({
+      name: "ship gate zero-diff story drains end-to-end under pr_per_story: commitStoryArtefacts returns a non-null sha",
+      run: () => {
+        expect(
+          typeof commit.sha === "string" && commit.sha.length > 0,
+          `expected non-null sha but got ${JSON.stringify(commit)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "ship gate zero-diff story drains end-to-end under pr_per_story: push to origin succeeds",
+      run: () => {
+        expect(
+          push.status === 0,
+          `expected push to succeed, got status=${push.status} stderr=${push.stderr}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "ship gate zero-diff story drains end-to-end under pr_per_story: markStoryComplete returns status=done (NOT a pr_per_story refusal)",
+      run: () => {
+        expect(
+          "status" in complete && complete.status === "done",
+          `expected status=done but got ${JSON.stringify(complete)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "ship gate zero-diff story drains end-to-end under pr_per_story: persisted story.status is 'done'",
+      run: async () => {
+        const state = await readSprintStatus(ctx.sprintStatusPath);
+        const story = state.stories.find((s) => s.id === "s1");
+        expect(!!story, "story s1 missing from final state");
+        expect(story!.status === "done", `expected story.status='done', got '${story!.status}'`);
+      },
+    });
+  } finally {
+    process.env.PATH = originalPath;
+    await fs.rm(ghShimDir, { recursive: true, force: true });
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
+
+/**
+ * shipgate-followups sprint, story 2 (B8 follow-up) — helper read-source.
+ *
+ * Asserts that the empty-commit fallback reads its base branch from
+ * `config.default_base`, NOT from `story.orchestrator.base_branch`. This is
+ * the root cause of the original B8 failure: the helper read the field from
+ * the story snapshot, which was stale (or differently surfaced) at the live
+ * reviewer call site, so it short-circuited to `sha:null` even though
+ * prepareStoryBranch had persisted the field.
+ *
+ * The fix removes the story-state dependency entirely. To prove that, we
+ * deliberately corrupt `story.orchestrator.base_branch` to a non-existent
+ * branch name AFTER prepareStoryBranch runs, and assert that
+ * commitStoryArtefacts STILL produces the empty commit (it would not if
+ * the helper were still consulting the story field — the
+ * `git rev-parse --verify` of a missing branch would short-circuit).
+ *
+ * Grep tag: "maybeLayDownShipGateEmptyCommit reads base from config not story state".
+ */
+async function runShipGateHelperReadsConfigBaseMiniRun(): Promise<AssertionOutcome[]> {
+  const outcomes: AssertionOutcome[] = [];
+
+  async function runOne(a: Assertion) {
+    try {
+      await a.run();
+      outcomes.push({ name: a.name, passed: true });
+      console.log(`  PASS  ${a.name}`);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      outcomes.push({ name: a.name, passed: false, error: msg });
+      console.log(`  FAIL  ${a.name}\n        ${msg}`);
+    }
+  }
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-orch-shipgate-base-"));
+  try {
+    const g = (args: string[]) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+    g(["init", "-q", "--initial-branch=main"]);
+    g(["config", "user.email", "test@example.com"]);
+    g(["config", "user.name", "Test"]);
+    g(["config", "commit.gpgsign", "false"]);
+
+    const sprintYaml = [
+      "schema_version: 1",
+      "sprint_id: shipgate-base-src-test",
+      "stories:",
+      "  - id: s1",
+      "    title: Helper reads config base not story state",
+      "    status: ready",
+      "    acceptance_criteria:",
+      "      checks:",
+      "        - type: shell",
+      '          cmd: "exit 0"',
+      "          exit_code: 0",
+      "    orchestrator: {}",
+      "",
+    ].join("\n");
+
+    const configDir = path.join(tmp, ".sprint-orchestrator");
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, "state.yaml"), sprintYaml, "utf8");
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".sprint-orchestrator/\n", "utf8");
+    g(["add", ".gitignore"]);
+    g(["commit", "-q", "-m", "init"]);
+
+    await fs.writeFile(
+      path.join(configDir, "config.yaml"),
+      [
+        "sprintStatusPath: .sprint-orchestrator/state.yaml",
+        "autoDetected: false",
+        'layout: "custom"',
+        "pr_per_story: true",
+        'default_base: "main"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ctx: ToolContext = {
+      projectRoot: tmp,
+      sprintStatusPath: path.join(tmp, ".sprint-orchestrator", "state.yaml"),
+      configPath: path.join(tmp, ".sprint-orchestrator", "config.yaml"),
+    };
+
+    await claimStory(ctx, "s1", "agent-base-src");
+    await prepareStoryBranch(ctx, "s1", "agent-base-src");
+
+    // Sabotage the story-level base_branch field. If the helper were still
+    // reading from story state, `git rev-parse --verify` of this name would
+    // fail and the helper would short-circuit to sha:null.
+    const stateRaw = await fs.readFile(
+      path.join(tmp, ".sprint-orchestrator", "state.yaml"),
+      "utf8",
+    );
+    const sabotaged = stateRaw.replace(
+      /base_branch: main/g,
+      "base_branch: this-branch-does-not-exist",
+    );
+    expect(
+      sabotaged !== stateRaw,
+      "test setup: expected prepareStoryBranch to have persisted base_branch: main in state.yaml so we could sabotage it",
+    );
+    await fs.writeFile(path.join(tmp, ".sprint-orchestrator", "state.yaml"), sabotaged, "utf8");
+
+    const result = await commitStoryArtefacts(ctx, "s1");
+
+    await runOne({
+      name: "maybeLayDownShipGateEmptyCommit reads base from config not story state: empty commit still produced when story.orchestrator.base_branch is sabotaged",
+      run: () => {
+        expect(
+          typeof result.sha === "string" && result.sha.length > 0,
+          `expected non-null sha (helper should have used config.default_base) but got ${JSON.stringify(result)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "maybeLayDownShipGateEmptyCommit reads base from config not story state: HEAD subject uses the ship-gate prefix",
+      run: () => {
+        const subject = g(["log", "-1", "--format=%s"]).stdout.trim();
+        expect(
+          subject.startsWith("chore(ship-gate):"),
+          `expected ship-gate prefix, got ${JSON.stringify(subject)}`,
+        );
+      },
+    });
+
+    await runOne({
+      name: "maybeLayDownShipGateEmptyCommit reads base from config not story state: HEAD is an empty commit (tree matches parent)",
+      run: () => {
+        const headTree = g(["rev-parse", "HEAD^{tree}"]).stdout.trim();
+        const parentTree = g(["rev-parse", "HEAD~1^{tree}"]).stdout.trim();
+        expect(
+          headTree === parentTree && headTree.length > 0,
+          `expected empty commit (HEAD tree == parent tree) — got HEAD=${headTree} parent=${parentTree}`,
+        );
+      },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+
+  return outcomes;
+}
 
 async function runPrPerStoryEnforcementMiniRun(): Promise<AssertionOutcome[]> {
   const outcomes: AssertionOutcome[] = [];

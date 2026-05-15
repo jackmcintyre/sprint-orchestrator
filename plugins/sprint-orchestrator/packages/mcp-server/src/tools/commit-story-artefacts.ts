@@ -100,13 +100,24 @@ export async function commitStoryArtefacts(
 
 /**
  * Ship-gate fallback: if `pr_per_story` is on AND the per-story branch
- * has zero commits ahead of its recorded `base_branch`, lay down one
- * empty commit so `git push -u origin <branch>` + `gh pr create` can
- * succeed. Returns the new commit's sha or `null` when no empty
- * commit was created (any precondition unmet, or git refused).
+ * has zero commits ahead of `config.default_base`, lay down one empty
+ * commit so `git push -u origin <branch>` + `gh pr create` can succeed.
+ * Returns the new commit's sha or `null` when no empty commit was
+ * created (any precondition unmet, or git refused).
  *
  * Trigger is structural — name-agnostic — so any verification-only
  * story (not just ones titled "ship gate") benefits.
+ *
+ * NOTE: we deliberately read the base from `config.default_base` rather
+ * than `story.orchestrator.base_branch`. The two values are equal in
+ * every case this helper would fire (prepareStoryBranch only deviates
+ * from `default_base` when a dependency's tip is used, which by
+ * definition means the dependency added commits — i.e. NOT a zero-diff
+ * ship-gate story). Reading from config removes one piece of implicit
+ * coupling between prepareStoryBranch and commitStoryArtefacts and
+ * sidesteps any state-snapshot staleness in the helper's read path.
+ * The `base_branch` field is still written by prepareStoryBranch for
+ * forensic/audit purposes; it is just no longer load-bearing here.
  */
 async function maybeLayDownShipGateEmptyCommit(
   ctx: ToolContext,
@@ -115,7 +126,7 @@ async function maybeLayDownShipGateEmptyCommit(
   const cfgRes = await getOrInitConfig(ctx);
   if (!cfgRes.config || cfgRes.config.pr_per_story !== true) return null;
 
-  const baseBranch = (story.orchestrator as Record<string, unknown>).base_branch;
+  const baseBranch = cfgRes.config.default_base;
   if (typeof baseBranch !== "string" || baseBranch.length === 0) return null;
 
   // Ensure the recorded base actually exists locally. If not (e.g. the
