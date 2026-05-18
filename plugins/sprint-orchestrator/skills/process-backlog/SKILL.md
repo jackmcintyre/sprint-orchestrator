@@ -9,6 +9,7 @@ allowed-tools:
   - "mcp__sprint-orchestrator__getReadyStories"
   - "mcp__sprint-orchestrator__claimStory"
   - "mcp__sprint-orchestrator__prepareStoryBranch"
+  - "mcp__sprint-orchestrator__markDevReturned"
   - "mcp__sprint-orchestrator__releaseStaleClaims"
   - "mcp__sprint-orchestrator__resolveSpawnModel"
   - "Task"
@@ -34,6 +35,9 @@ Repeat until either `getReadyStories` returns `[]` or you have completed **5 sto
 3. Call `claimStory` with `S.id` and that agent ID. If `claimed` is false (another orchestrator beat you to it), skip to the next ready story.
 4. Call `prepareStoryBranch` with `S.id` and the same agent ID. When `pr_per_story` is enabled in config (off by default while the per-story workflow is still in progress — opt in explicitly to test it), this creates and checks out a per-story branch from `default_base` so the dev's commits land on it; when disabled, it returns `{ branch: null, skipped: true }` and you proceed unchanged. If it returns `{ branch: null, skipped: true, reason: "default_base-stale", message }`, the configured `default_base` lags behind on the orchestrator schema. **Surface the `message` to the user and STOP this run** — do NOT silently fall back to shared-branch mode (that hides the misconfiguration and pollutes every PR with hundreds of lines of unrelated diff). The user must either rebase `default_base` onto their invocation branch or update `default_base` in `.sprint-orchestrator/config.yaml` before re-invoking.
 5. Spawn a `dev` subagent via the `Task` tool. Pass the story ID in the prompt. Wait for it to return. Before this Task spawn, call the MCP tool `resolveSpawnModel` with the story ID and the role (`dev` or `reviewer`) and pass the returned model ID via Task's `model` parameter.
+
+   **Immediately after the dev Task returns — regardless of summary content, regardless of whether the dev produced any code — call `markDevReturned(storyId, agentId)` yourself.** The Task tool returning IS the "dev returned" signal; that is what the field is named after. The dev subagent's own `markDevReturned` call (per its behavioural directives) is now belt-and-braces. This call is idempotent (calling twice just refreshes the timestamp), so the orchestrator-side call is safe whether the dev called it first or forgot.
+   This step prevents the previously-observed deadlock where a dev subagent silently died (or skipped its mandatory tool call), leaving `dev_returned_at` unset and the AC-guard refusing every subsequent reviewer mutation — a state with no API recovery path.
 6. Spawn a `reviewer` subagent for the same story ID via `Task`, passing both the story ID and the same agent ID you used in step 3. The reviewer will call `recordStorySuccess`, `recordStoryRework`, or `recordStoryFailure` itself. Before this Task spawn, call the MCP tool `resolveSpawnModel` with the story ID and the role (`dev` or `reviewer`) and pass the returned model ID via Task's `model` parameter.
 7. After the reviewer returns, inspect its one-line status:
    - `done: <id>` — log it and move on to the next ready story.
