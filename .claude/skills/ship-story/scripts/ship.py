@@ -7,7 +7,8 @@ and emits structured JSON on stdout when it has a result the orchestrator needs 
 
 Subcommands:
   preflight                       sanity-check the environment before a run
-  resolve [story_id]              pick story, extract ACs, return JSON
+  resolve [story_id]              pick story, extract ACs, return JSON, persist
+                                  it to /tmp/ship-<key>.resolve.json
   worktree <story_key>            create worktree + branch off origin/main
   set-status <key> <status>       atomic mutation of sprint-status.yaml
   verify-ac-table <results.json>  hard gate: fail if any AC row not green
@@ -17,6 +18,9 @@ Subcommands:
   cleanup <story_key>             post-merge: status→done, remove worktree,
                                   delete branch, sync main, tidy /tmp
   pending-cleanup                 list stories with pr_opened but no cleaned
+  reviewer-issues <story_key>     render reviewer-flagged issues (from
+                                  review_pass events' data.issues) as a
+                                  markdown bullet list for Step 11 summary
 """
 from __future__ import annotations
 
@@ -196,7 +200,7 @@ def cmd_resolve(args) -> None:
             f"no acceptance criteria found for story {story_short} in {epic_file.name}"
         )
 
-    print(json.dumps({
+    payload = {
         "story_key": story_key,
         "story_short": story_short,
         "epic_num": epic_num,
@@ -205,7 +209,11 @@ def cmd_resolve(args) -> None:
         "epic_file": str(epic_file.relative_to(REPO)),
         "acceptance_criteria": acs,
         "spec_path": f"_bmad-output/implementation-artifacts/{story_key}.md",
-    }, indent=2))
+    }
+    resolve_json_path = Path(f"/tmp/ship-{story_key}.resolve.json")
+    resolve_json_path.write_text(json.dumps(payload, indent=2))
+    payload["resolve_json_path"] = str(resolve_json_path)
+    print(json.dumps(payload, indent=2))
 
 
 # ---------------------------------------------------------------- worktree
@@ -547,6 +555,44 @@ def cmd_reconcile(args) -> None:
     print(json.dumps({"reconciled": reconciled, "skipped": skipped}, indent=2))
 
 
+def cmd_reviewer_issues(args) -> None:
+    """Emit reviewer-flagged issues recorded across all review passes.
+
+    Reads `review_pass` events from the run log and collects each pass's
+    `data.issues` array (orchestrator records this when the reviewer flagged
+    items but still approved). Output is a markdown bullet list suitable for
+    pasting into the Step 11 summary, or empty string if no issues recorded.
+    """
+    log = run_log(args.story_key)
+    if not log.exists():
+        print("")
+        return
+    flagged: list[dict] = []
+    for line in log.read_text().splitlines():
+        if not line.strip():
+            continue
+        e = json.loads(line)
+        if e.get("event") != "review_pass":
+            continue
+        d = e.get("data") or {}
+        for issue in d.get("issues") or []:
+            row = dict(issue) if isinstance(issue, dict) else {"text": str(issue)}
+            row["pass"] = d.get("pass")
+            flagged.append(row)
+    if not flagged:
+        print("")
+        return
+    lines = []
+    for f in flagged:
+        sev = f.get("severity", "").strip()
+        loc = f.get("location", "").strip()
+        desc = f.get("description") or f.get("text") or ""
+        prefix = f"[{sev}] " if sev else ""
+        loc_part = f" `{loc}` —" if loc else ""
+        lines.append(f"- {prefix}{loc_part} {desc}".strip())
+    print("\n".join(lines))
+
+
 def cmd_pending_cleanup(args) -> None:
     """Stories whose last recorded run event is `pr_opened` (shipped, not yet cleaned)."""
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -614,6 +660,10 @@ def main() -> None:
 
     sub.add_parser("pending-cleanup").set_defaults(func=cmd_pending_cleanup)
     sub.add_parser("reconcile").set_defaults(func=cmd_reconcile)
+
+    ri = sub.add_parser("reviewer-issues")
+    ri.add_argument("story_key")
+    ri.set_defaults(func=cmd_reviewer_issues)
 
     args = p.parse_args()
     args.func(args)

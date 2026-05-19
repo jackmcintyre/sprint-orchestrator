@@ -37,7 +37,7 @@ Halts if working tree is dirty, gh is unauthed, or required paths are missing. N
 $SH resolve [<story_id>]
 ```
 
-Returns JSON with `story_key`, `story_short`, `title`, `epic_num`, `epic_file`, `spec_path`, and `acceptance_criteria[]`. Save the JSON to `/tmp/ship-<story_key>.resolve.json` — you'll reuse it in Step 9.
+Returns JSON with `story_key`, `story_short`, `title`, `epic_num`, `epic_file`, `spec_path`, and `acceptance_criteria[]`. The script also persists the JSON to `/tmp/ship-<story_key>.resolve.json` (path echoed back as `resolve_json_path`) for reuse in Step 9 — you don't need to write it yourself.
 
 Print the story title and AC count to the user.
 
@@ -77,6 +77,8 @@ $SH record <story_key> spec_authored
 Cheap insurance — a malformed spec wastes a full dev+review cycle. Spawn ONE subagent. Prompt:
 
 > Run the `bmad-create-story` skill with action `validate` against `<spec_path>`. Return the validation report verbatim and a single-word verdict: `pass` or `fail`. Do NOT modify `sprint-status.yaml`. Do NOT pause for clarifying questions.
+>
+> **In addition to the skill's own checks, verify that every example in the spec actually satisfies the rules it illustrates.** Examples: if the spec defines a commit-message regex AND gives a sample commit message, the sample must match the regex. If the spec defines a schema AND gives a sample event, the sample must validate. Flag any example-vs-rule contradiction as `fail` — these waste a full dev pass when the dev hits the contradiction at implementation time.
 
 If verdict is `fail` → halt with `SPEC_VALIDATION_FAILED`, surface the report, and record:
 
@@ -113,8 +115,12 @@ If the returned summary reports no commit (or `git -C <worktree_path> log --onel
 Maintain a local counter `passes = 0`. Loop:
 
 1. `passes += 1`. Halt with `REVIEW_BLOCKED` if `passes > 3`.
-2. Spawn a fresh subagent: "Run `bmad-code-review` against the diff on branch `story/<story_key>`. Return verdict (`approve` / `request-changes` / `block`) and an itemised issue list. Do NOT modify `sprint-status.yaml`. Do NOT pause for questions."
-3. `$SH record <story_key> review_pass --data '{"pass":N,"verdict":"..."}'`
+2. Spawn a fresh subagent: "Run `bmad-code-review` against the diff on branch `story/<story_key>`. Return verdict (`approve` / `request-changes` / `block`) and an itemised issue list, where each item has `severity` (Critical/High/Medium/Low/Info), `location` (`file:line` if applicable), and `description`. Do NOT modify `sprint-status.yaml`. Do NOT pause for questions."
+3. Record the verdict AND the issue list — this is how Step 11 surfaces non-blocker issues that shipped:
+   ```bash
+   $SH record <story_key> review_pass --data '{"pass":N,"verdict":"...","issues":[{"severity":"Low","location":"foo.ts:12","description":"..."}, ...]}'
+   ```
+   If the reviewer returned no issues, omit `issues` (or pass `[]`).
 4. If `approve` → break; continue to Step 8.
 5. If `block` → halt with `REVIEW_BLOCKED`. No PR.
 6. If `request-changes` → spawn a fresh dev subagent (running `bmad-dev-story`) with the issue list and `<spec_path>`: "Address each issue. Do not change scope beyond what was flagged. Commit your fixes to `story/<story_key>` before returning (do not push, do not touch sprint-status.yaml). Confirm tests still green." Then loop to step 1.
@@ -207,10 +213,19 @@ $SH record <story_key> ci_green
 
 ### Step 11 — Summarise
 
-Tell the user, in 2-3 sentences:
+First, render any reviewer-flagged issues (even ones the reviewer approved-with-notes — these are easy to lose between merge and the next story):
+
+```bash
+$SH reviewer-issues <story_key>
+```
+
+If the output is non-empty, include it in the summary under a **Reviewer notes (shipped anyway)** heading so Jack can decide whether to log a follow-up before forgetting. Empty output → omit the heading.
+
+Then tell the user, in 2-3 sentences plus the optional notes block:
 - which story shipped + PR URL
 - review passes consumed (`N of 3`) and CI passes consumed (`M of 3`)
 - where the run log lives (for replay/debug)
+- reviewer notes block (if any — see above)
 - one-line reminder: "Tell me when you've merged and I'll clean up."
 
 ### Step 12 — Post-merge cleanup (conversational trigger)
