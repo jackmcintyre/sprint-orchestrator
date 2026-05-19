@@ -128,3 +128,46 @@ export class StaleWorkspaceConfigError extends DomainError {
     this.schemaModule = opts.schemaModule;
   }
 }
+
+/**
+ * `docs/standards.md` was not found at the expected path under the target
+ * repo. User must copy the shipped example to bootstrap. Distinct from
+ * StandardsDocMalformedError (file exists but fails the schema).
+ */
+export class StandardsDocMissingError extends DomainError {
+  readonly expectedPath: string;
+  readonly copyTarget: string;
+
+  constructor(opts: { expectedPath: string; copyTarget: string }) {
+    super(
+      `docs/standards.md not found at ${opts.expectedPath}. ` +
+        `Copy the shipped template from ${opts.copyTarget} to ` +
+        `<target-repo>/docs/standards.md and edit for your project. (FR45)`,
+    );
+    this.expectedPath = opts.expectedPath;
+    this.copyTarget = opts.copyTarget;
+  }
+}
+
+/**
+ * `docs/standards.md` was found but failed the parser: either YAML syntax
+ * is invalid, a required field is missing or wrongly typed, or the
+ * 10-criterion hard cap (FR46) is exceeded. The `zodMessage` field carries
+ * the formatted Zod error (or the explicit cap-violation message). The
+ * user-facing `message` cites the offending field or the cap.
+ */
+export class StandardsDocMalformedError extends DomainError {
+  readonly sourcePath: string;
+  readonly zodMessage: string;
+  readonly copyTarget: string;
+
+  constructor(opts: { sourcePath: string; zodMessage: string; copyTarget: string }) {
+    super(
+      `docs/standards.md at ${opts.sourcePath} is malformed: ${opts.zodMessage}. ` +
+        `See the canonical shape in ${opts.copyTarget}. (FR46)`,
+    );
+    this.sourcePath = opts.sourcePath;
+    this.zodMessage = opts.zodMessage;
+    this.copyTarget = opts.copyTarget;
+  }
+}
