@@ -1,6 +1,6 @@
-# claude-dev-loop
+# crew
 
-claude-dev-loop is an experiment in replacing the product engineering team with AI tooling.
+crew is an experiment in replacing the product engineering team with AI tooling.
 The piece that turned out useful is the **sprint-orchestrator** plugin — it drives a sprint
 backlog end-to-end via dev and reviewer subagents, so a planned sprint becomes a stack of
 shipped, reviewed PRs while you walk away. The goal: a relatively technical non-engineer can
@@ -18,8 +18,8 @@ replacing hands-on-keyboards.
 **1. Install the plugin**
 
 ```bash
-git clone https://github.com/jackmcintyre/claude-dev-loop.git
-cd claude-dev-loop
+git clone https://github.com/jackmcintyre/crew.git
+cd crew
 pnpm --dir plugins/sprint-orchestrator install
 ```
 

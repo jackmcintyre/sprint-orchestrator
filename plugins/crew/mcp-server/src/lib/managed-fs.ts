@@ -12,11 +12,11 @@ import { CanonicalFsWriteError } from "../errors.js";
  * write-shaped `node:fs` API.
  */
 export const CANONICAL_PATH_GLOBS: readonly string[] = [
-  ".claude-dev-loop/state/**",
-  ".claude-dev-loop/telemetry/**",
-  ".claude-dev-loop/retro-proposals/**",
-  ".claude-dev-loop/sprint-history/**",
-  ".claude-dev-loop/sessions/**",
+  ".crew/state/**",
+  ".crew/telemetry/**",
+  ".crew/retro-proposals/**",
+  ".crew/sprint-history/**",
+  ".crew/sessions/**",
   "team/**",
   "docs/standards.md",
   "docs/risk-tiering.md",

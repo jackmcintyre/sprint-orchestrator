@@ -98,7 +98,7 @@ describe("validateActiveAdapter", () => {
       expect(e.message).toContain("mcp-server/src/schemas/workspace-config.ts");
       // AC3: message also points the user at the canonical example
       expect(e.message).toContain(
-        "plugins/crew/example/.claude-dev-loop/config.yaml",
+        "plugins/crew/example/.crew/config.yaml",
       );
       expect(e.schemaModule).toBe("mcp-server/src/schemas/workspace-config.ts");
     }

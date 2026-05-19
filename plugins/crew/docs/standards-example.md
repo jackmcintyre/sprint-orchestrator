@@ -12,7 +12,7 @@ criteria:
   - name: "no-canonical-fs-writes-outside-mcp"
     what: "No code path writes to canonical-state paths (manifests, personas, registry, telemetry) except through MCP tools."
     check: "Grep the diff for raw fs.writeFile/fs.writeFileSync; any hit under a canonical path is a fail."
-    anti_criterion: "Direct fs.write to .claude-dev-loop/state, telemetry, or docs/standards.md."
+    anti_criterion: "Direct fs.write to .crew/state, telemetry, or docs/standards.md."
   - name: "errors-are-typed"
     what: "Every named failure mode in the diff throws a DomainError subclass; uncaught throws are bugs."
     check: "Inspect new throw sites; assert they throw a class extending DomainError with a one-line user-facing message."

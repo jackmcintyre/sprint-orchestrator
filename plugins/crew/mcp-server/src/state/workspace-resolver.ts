@@ -16,7 +16,7 @@ import {
 import { writeManagedFile } from "../lib/managed-fs.js";
 
 const SCHEMA_MODULE = "mcp-server/src/schemas/workspace-config.ts";
-const CONFIG_REL_PATH = path.join(".claude-dev-loop", "config.yaml");
+const CONFIG_REL_PATH = path.join(".crew", "config.yaml");
 
 /**
  * Result of resolving a target repo's workspace configuration. The MCP
@@ -25,7 +25,7 @@ const CONFIG_REL_PATH = path.join(".claude-dev-loop", "config.yaml");
 export interface Workspace {
   /** Absolute path to the target repo root. */
   targetRepoRoot: string;
-  /** Mirrors `adapter` from `.claude-dev-loop/config.yaml`. */
+  /** Mirrors `adapter` from `.crew/config.yaml`. */
   activeAdapterName: string;
   /** The registered `PlanningAdapter` instance for `activeAdapterName`. */
   activeAdapter: PlanningAdapter;
@@ -51,7 +51,7 @@ async function fileExists(p: string): Promise<boolean> {
 }
 
 /**
- * Resolve `<targetRepoRoot>/.claude-dev-loop/config.yaml` into a typed
+ * Resolve `<targetRepoRoot>/.crew/config.yaml` into a typed
  * `Workspace`. Auto-detects on first use; surfaces typed errors for
  * missing-adapter, ambiguous-adapter, and invalid-config cases.
  *
@@ -91,7 +91,7 @@ export async function resolveWorkspace(opts: ResolveWorkspaceOptions): Promise<W
     });
     // Route through writeManagedFile so the canonical-fs write boundary
     // is the only entrypoint that touches disk under <targetRepoRoot>.
-    // `.claude-dev-loop/config.yaml` is non-canonical (it's user-authored
+    // `.crew/config.yaml` is non-canonical (it's user-authored
     // config, not agent-managed state), so this call passes through without
     // an mcpToolContext.
     await writeManagedFile({

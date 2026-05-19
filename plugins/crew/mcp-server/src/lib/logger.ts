@@ -1,6 +1,6 @@
 /**
  * Telemetry logger — the ONLY write path for structured JSONL
- * telemetry events under `<targetRepoRoot>/.claude-dev-loop/telemetry/<YYYY-MM>.jsonl`.
+ * telemetry events under `<targetRepoRoot>/.crew/telemetry/<YYYY-MM>.jsonl`.
  *
  * Whitelisted in `tests/canonical-fs-guard.test.ts` to import a
  * write-shaped `node:fs` API. Every other code path that wants to
@@ -71,7 +71,7 @@ async function appendJsonlLine(
   const month = monthBucket(ts);
   const filePath = path.join(
     targetRepoRoot,
-    ".claude-dev-loop",
+    ".crew",
     "telemetry",
     `${month}.jsonl`,
   );

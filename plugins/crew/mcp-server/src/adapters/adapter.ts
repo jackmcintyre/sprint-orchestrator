@@ -18,13 +18,13 @@ export interface PlanningAdapter {
   resolveSourcePath(ref: string): string;
   watchForChanges?(): AsyncIterable<ChangeEvent>;
   /**
-   * Default `adapter_config` block written into `.claude-dev-loop/config.yaml`
+   * Default `adapter_config` block written into `.crew/config.yaml`
    * on first-run auto-detect (Story 1.2 AC2).
    */
   defaultConfig(): Record<string, unknown>;
   /**
    * Zod schema that validates the adapter's `adapter_config` block from
-   * a loaded `.claude-dev-loop/config.yaml` (Story 1.2 AC1, AC3).
+   * a loaded `.crew/config.yaml` (Story 1.2 AC1, AC3).
    */
   adapterConfigSchema: z.ZodTypeAny;
 }

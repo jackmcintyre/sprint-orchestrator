@@ -25,7 +25,7 @@ async function makeTargetRepo(prefix: string): Promise<string> {
 }
 
 function telemetryDir(root: string): string {
-  return path.join(root, ".claude-dev-loop", "telemetry");
+  return path.join(root, ".crew", "telemetry");
 }
 
 async function readJsonlLines(filePath: string): Promise<string[]> {

@@ -104,7 +104,7 @@ describe("resolveWorkspace", () => {
     expect(ws1.pluginSettings.agreement_threshold).toBe(0.8);
     expect(ws1.pluginSettings.orchestration_interval_seconds).toBe(120);
 
-    const configPath = path.join(tmp, ".claude-dev-loop", "config.yaml");
+    const configPath = path.join(tmp, ".crew", "config.yaml");
     const written = await fs.readFile(configPath, "utf8");
     const parsed = yamlParse(written) as { adapter: string };
     expect(parsed.adapter).toBe("stubA");
@@ -148,7 +148,7 @@ describe("resolveWorkspace", () => {
       resolveWorkspace({ targetRepoRoot: tmp, adapters: [stub] }),
     ).rejects.toBeInstanceOf(NoAdapterMatchedError);
 
-    const configPath = path.join(tmp, ".claude-dev-loop", "config.yaml");
+    const configPath = path.join(tmp, ".crew", "config.yaml");
     await expect(fs.stat(configPath)).rejects.toThrow();
   });
 
@@ -170,7 +170,7 @@ describe("resolveWorkspace", () => {
       expect(e.message).toContain("stubB");
     }
 
-    const configPath = path.join(tmp, ".claude-dev-loop", "config.yaml");
+    const configPath = path.join(tmp, ".crew", "config.yaml");
     await expect(fs.stat(configPath)).rejects.toThrow();
   });
 });

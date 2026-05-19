@@ -23,7 +23,7 @@ export class DomainError extends Error {
 export class NotImplementedError extends DomainError {}
 
 /**
- * `.claude-dev-loop/config.yaml` exists but failed schema validation
+ * `.crew/config.yaml` exists but failed schema validation
  * (malformed YAML, missing required keys, wrong types, unknown adapter
  * name, or invalid adapter_config). User must fix the file by hand —
  * the resolver does NOT fall back to `detect()`.
@@ -43,7 +43,7 @@ export class InvalidWorkspaceConfigError extends DomainError {
     super(
       `${opts.configPath} is invalid at '${opts.yamlPath}': ${opts.zodMessage}. ` +
         `See ${opts.schemaModule} and the canonical example in ` +
-        `plugins/crew/example/.claude-dev-loop/config.yaml.`,
+        `plugins/crew/example/.crew/config.yaml.`,
     );
     this.configPath = opts.configPath;
     this.yamlPath = opts.yamlPath;
@@ -54,7 +54,7 @@ export class InvalidWorkspaceConfigError extends DomainError {
 
 /**
  * No registered adapter's `detect()` returned true for the target repo.
- * User must author `.claude-dev-loop/config.yaml` manually.
+ * User must author `.crew/config.yaml` manually.
  */
 export class NoAdapterMatchedError extends DomainError {
   readonly targetRepoRoot: string;
@@ -64,8 +64,8 @@ export class NoAdapterMatchedError extends DomainError {
     super(
       `No registered adapter recognises ${opts.targetRepoRoot}. ` +
         `Registered adapters: [${opts.registeredAdapters.join(", ")}]. ` +
-        `Author .claude-dev-loop/config.yaml manually following ` +
-        `plugins/crew/example/.claude-dev-loop/config.yaml.`,
+        `Author .crew/config.yaml manually following ` +
+        `plugins/crew/example/.crew/config.yaml.`,
     );
     this.targetRepoRoot = opts.targetRepoRoot;
     this.registeredAdapters = opts.registeredAdapters;
@@ -84,7 +84,7 @@ export class AmbiguousAdapterError extends DomainError {
     super(
       `Multiple adapters recognise ${opts.targetRepoRoot}: ` +
         `[${opts.matchingAdapters.join(", ")}]. ` +
-        `Author .claude-dev-loop/config.yaml manually to pick one.`,
+        `Author .crew/config.yaml manually to pick one.`,
     );
     this.targetRepoRoot = opts.targetRepoRoot;
     this.matchingAdapters = opts.matchingAdapters;
@@ -114,10 +114,10 @@ export class StaleWorkspaceConfigError extends DomainError {
       opts.otherMatchingAdapters.length > 0
         ? `Other registered adapters that recognise this repo: ` +
           `[${opts.otherMatchingAdapters.join(", ")}]. ` +
-          `Update the 'adapter:' key in .claude-dev-loop/config.yaml.`
+          `Update the 'adapter:' key in .crew/config.yaml.`
         : `No other registered adapter recognises this repo either. ` +
           `See ${opts.schemaModule} and the canonical example in ` +
-          `plugins/crew/example/.claude-dev-loop/config.yaml.`;
+          `plugins/crew/example/.crew/config.yaml.`;
     super(
       `Configured adapter '${opts.configuredAdapter}' returned detect()=false ` +
         `for ${opts.targetRepoRoot}. ${redirect}`,
@@ -363,7 +363,7 @@ export class CrossFilesystemMoveError extends DomainError {
         `from='${opts.absFromPath}', to='${opts.absToPath}'. ` +
         `v1 explicitly does not support cross-filesystem moves ` +
         `(NFR8 — single-syscall atomicity). Place the target repo on a ` +
-        `single filesystem, or align the .claude-dev-loop/state/ tree ` +
+        `single filesystem, or align the .crew/state/ tree ` +
         `with the repo root. (Story 1.6 AC2)`,
     );
     this.absFromPath = opts.absFromPath;

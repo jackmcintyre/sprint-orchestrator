@@ -59,7 +59,7 @@ describe("writeManagedFile runtime guard (AC5c runtime)", () => {
   it("rejects canonical-state writes without an MCP tool context", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "managed-fs-canonical-"));
     tmpDirs.push(root);
-    const target = path.join(root, ".claude-dev-loop", "state", "to-do", "bmad:1.yaml");
+    const target = path.join(root, ".crew", "state", "to-do", "bmad:1.yaml");
 
     await expect(
       writeManagedFile({
@@ -80,7 +80,7 @@ describe("writeManagedFile runtime guard (AC5c runtime)", () => {
       expect(err).toBeInstanceOf(CanonicalFsWriteError);
       const e = err as CanonicalFsWriteError;
       expect(e.message).toContain(target);
-      expect(e.message).toContain(".claude-dev-loop/state/**");
+      expect(e.message).toContain(".crew/state/**");
       expect(e.message).toContain("(FR81/NFR16)");
     }
   });
@@ -103,7 +103,7 @@ describe("writeManagedFile runtime guard (AC5c runtime)", () => {
   it("permits canonical writes when an MCP tool context is provided", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "managed-fs-mcpctx-"));
     tmpDirs.push(root);
-    const target = path.join(root, ".claude-dev-loop", "state", "to-do", "bmad:2.yaml");
+    const target = path.join(root, ".crew", "state", "to-do", "bmad:2.yaml");
 
     await writeManagedFile({
       absPath: target,

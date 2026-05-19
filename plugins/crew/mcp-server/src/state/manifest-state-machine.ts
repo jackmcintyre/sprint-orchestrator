@@ -8,7 +8,7 @@ import {
 
 /**
  * The canonical state-machine directory names. A manifest at
- * `<targetRepoRoot>/.claude-dev-loop/state/<state>/<ref>.yaml` is
+ * `<targetRepoRoot>/.crew/state/<state>/<ref>.yaml` is
  * "in" the named state by virtue of its parent directory. (NFR8)
  */
 export const STATE_NAMES = [
@@ -90,7 +90,7 @@ export async function moveBetweenStates(opts: {
   }
 
   // 2. Compute paths.
-  const stateRoot = path.join(targetRepoRoot, ".claude-dev-loop", "state");
+  const stateRoot = path.join(targetRepoRoot, ".crew", "state");
   const absFromPath = path.join(stateRoot, from, ref + ".yaml");
   const absToPath = path.join(stateRoot, to, ref + ".yaml");
 

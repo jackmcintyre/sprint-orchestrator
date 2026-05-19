@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * `.claude-dev-loop/config.yaml` schema.
+ * `.crew/config.yaml` schema.
  *
  * The top-level shape is validated here. The active adapter validates
  * its own `adapter_config` block via the adapter's own Zod schema —

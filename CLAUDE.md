@@ -1,4 +1,4 @@
-# Project: claude-dev-loop
+# Project: crew
 
 ## Who I'm working with
 
@@ -25,7 +25,7 @@ Authoritative PRD: `_bmad-output/planning-artifacts/prd-crew-v1.md`.
 
 ## What this project is
 
-`claude-dev-loop` is the home of **AI Engineering Team v1** — a Claude Code plugin (not yet built; PRD in `_bmad-output/planning-artifacts/prd-crew-v1.md`) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
+`crew` is the home of **AI Engineering Team v1** — a Claude Code plugin (not yet built; PRD in `_bmad-output/planning-artifacts/prd-crew-v1.md`) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
 
 The repo previously hosted a `sprint-orchestrator` plugin which was used to dog-food the same broad idea against a sprint construct. That plugin was treated as legacy from day one of the new effort and has been removed (2026-05-19); the new product is being built from scratch.
 

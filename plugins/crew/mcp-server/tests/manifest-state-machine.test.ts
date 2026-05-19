@@ -33,7 +33,7 @@ async function makeRoot(): Promise<string> {
 }
 
 function stateDir(root: string, state: StateName): string {
-  return path.join(root, ".claude-dev-loop", "state", state);
+  return path.join(root, ".crew", "state", state);
 }
 
 async function seedManifest(
