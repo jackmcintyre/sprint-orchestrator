@@ -1,1 +1,1 @@
-{"ts":"2026-05-20T10:00:00+00:00","event":"user_surface_verified","data":{"operator":"jack","observations":[{"ac_ref":1,"pasted_output":"verbatim output"}]}}
+{"type":"user_surface_verified","ts":"2026-05-20T10:00:00+00:00","story_key":"case-iv-a-malformed-missing-ac-refs","data":{"operator":"jack","observations":[{"ac_ref":1,"pasted_output":"verbatim output"}]}}

@@ -53,14 +53,14 @@ except ImportError:
 REPO = Path(__file__).resolve().parents[4]
 STATUS_FILE = REPO / "_bmad-output/implementation-artifacts/sprint-status.yaml"
 EPICS_DIR = REPO / "_bmad-output/planning-artifacts/epics"
-# Tests can override RUNS_DIR via CREW_SHIP_RUNS_DIR so the suite never
-# pollutes the real run log.
-RUNS_DIR = Path(
-    os.environ.get(
-        "CREW_SHIP_RUNS_DIR",
-        str(REPO / ".claude/skills/ship-story/.runs"),
-    )
-)
+# Tests override the runs dir via CREW_SHIP_RUNS_DIR. Resolved at call time
+# (not module load) so the env var is robust to import order and to tests
+# that set it after import.
+_DEFAULT_RUNS_DIR = REPO / ".claude/skills/ship-story/.runs"
+
+
+def runs_dir() -> Path:
+    return Path(os.environ.get("CREW_SHIP_RUNS_DIR", str(_DEFAULT_RUNS_DIR)))
 
 # Exit code mnemonic for the pre-PR user-surface gate.
 EXIT_USER_SURFACE_UNVERIFIED = 42
@@ -108,8 +108,9 @@ def story_keys(dev_status: dict) -> list[str]:
 
 
 def run_log(story_key: str) -> Path:
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    return RUNS_DIR / f"{story_key}.jsonl"
+    rd = runs_dir()
+    rd.mkdir(parents=True, exist_ok=True)
+    return rd / f"{story_key}.jsonl"
 
 
 # ---------------------------------------------------------------- preflight
@@ -625,9 +626,10 @@ def cmd_reviewer_issues(args) -> None:
 
 def cmd_pending_cleanup(args) -> None:
     """Stories whose last recorded run event is `pr_opened` (shipped, not yet cleaned)."""
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    rd = runs_dir()
+    rd.mkdir(parents=True, exist_ok=True)
     pending = []
-    for log in sorted(RUNS_DIR.glob("*.jsonl")):
+    for log in sorted(rd.glob("*.jsonl")):
         events = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
         if not events:
             continue
@@ -658,7 +660,7 @@ def _validate_verification_event(event: dict) -> None:
     """
     if not isinstance(event, dict):
         raise MalformedVerificationEvent("event must be a JSON object")
-    etype = event.get("event") or event.get("type")
+    etype = event.get("type")
     if etype not in _VERIFICATION_EVENT_TYPES:
         raise MalformedVerificationEvent(
             f"unknown verification event type: {etype!r}"
@@ -753,7 +755,7 @@ def _load_verification_events(story_key: str) -> dict:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        etype = event.get("event") or event.get("type")
+        etype = event.get("type")
         if etype not in _VERIFICATION_EVENT_TYPES:
             continue
         try:
@@ -806,7 +808,7 @@ def cmd_pre_pr_gate(args) -> None:
     automated_cov: set[int] = set()
     operator_cov: set[int] = set()
     for ev in diag["valid_events"]:
-        etype = ev.get("event") or ev.get("type")
+        etype = ev.get("type")
         refs = set(ev["data"]["ac_refs"])
         if etype == "automated_e2e_verified":
             automated_cov |= refs
@@ -816,33 +818,11 @@ def cmd_pre_pr_gate(args) -> None:
     union_cov = automated_cov | operator_cov
     missing = sorted(user_surface - union_cov)
 
-    # If malformed events would otherwise have made the gate pass, fail with
-    # the typed error visible on stderr.
-    if diag["malformed"]:
-        # Coverage including malformed events — to detect "would have passed".
-        hypothetical: set[int] = set(union_cov)
-        for ev, _err in diag["malformed"]:
-            data = ev.get("data") or {}
-            refs = data.get("ac_refs") if isinstance(data, dict) else None
-            if isinstance(refs, list):
-                for n in refs:
-                    if isinstance(n, int) and not isinstance(n, bool):
-                        hypothetical.add(n)
-        would_have_passed = user_surface.issubset(hypothetical) and not user_surface.issubset(union_cov)
-        if would_have_passed or missing:
-            for _ev, err in diag["malformed"]:
-                sys.stderr.write(f"MalformedVerificationEvent: {err}\n")
-            if missing:
-                sys.stderr.write(
-                    "Missing user-surface verification for "
-                    + ", ".join(f"AC{n}" for n in missing)
-                    + ". Provide either an automated_e2e_verified event covering "
-                    + "these ACs, or a user_surface_verified event with pasted "
-                    + "Claude Code output for each.\n"
-                )
-            sys.exit(EXIT_USER_SURFACE_UNVERIFIED)
-
     if missing:
+        # Surface any malformed-event diagnostics first so the operator sees
+        # why an apparently-present event didn't count.
+        for _ev, err in diag["malformed"]:
+            sys.stderr.write(f"MalformedVerificationEvent: {err}\n")
         sys.stderr.write(
             "Missing user-surface verification for "
             + ", ".join(f"AC{n}" for n in missing)
@@ -885,7 +865,7 @@ def cmd_record_verification(args) -> None:
             f"MalformedVerificationEvent: --data must be valid JSON ({exc})\n"
         )
         sys.exit(2)
-    candidate = {"event": args.type, "data": data}
+    candidate = {"type": args.type, "data": data}
     try:
         _validate_verification_event(candidate)
     except MalformedVerificationEvent as exc:
@@ -893,8 +873,9 @@ def cmd_record_verification(args) -> None:
         sys.exit(2)
 
     payload = {
+        "type": args.type,
         "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "event": args.type,
+        "story_key": args.story_key,
         "data": data,
     }
     with run_log(args.story_key).open("a") as f:

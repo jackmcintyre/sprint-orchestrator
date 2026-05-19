@@ -1,1 +1,1 @@
-{"ts":"2026-05-20T10:00:00+00:00","event":"user_surface_verified","data":{"ac_refs":[1],"operator":"jack","observations":[{"ac_ref":1}]}}
+{"type":"user_surface_verified","ts":"2026-05-20T10:00:00+00:00","story_key":"case-iv-b-malformed-missing-pasted-output","data":{"ac_refs":[1],"operator":"jack","observations":[{"ac_ref":1}]}}

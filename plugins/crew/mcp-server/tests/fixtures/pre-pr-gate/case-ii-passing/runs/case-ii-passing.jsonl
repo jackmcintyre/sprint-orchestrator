@@ -1,1 +1,1 @@
-{"ts":"2026-05-20T10:00:00+00:00","event":"user_surface_verified","data":{"ac_refs":[1],"operator":"jack","observations":[{"ac_ref":1,"pasted_output":"verbatim claude code output here"}]}}
+{"type":"user_surface_verified","ts":"2026-05-20T10:00:00+00:00","story_key":"case-ii-passing","data":{"ac_refs":[1],"operator":"jack","observations":[{"ac_ref":1,"pasted_output":"verbatim claude code output here"}]}}

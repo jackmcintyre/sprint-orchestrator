@@ -13,6 +13,8 @@ import { describe, it, expect } from "vitest";
 import { execa } from "execa";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../../..");
@@ -35,10 +37,26 @@ async function runGate(caseDir: string, storyKey: string) {
 }
 
 describe("ship.py pre-pr-gate (Story 1.8 AC4)", () => {
-  it("case i — user-surface AC with no evidence fails with USER_SURFACE_UNVERIFIED (AC3, AC4-i)", async () => {
+  it("case i — user-surface AC with empty run log fails with USER_SURFACE_UNVERIFIED (AC3, AC4-i)", async () => {
+    // The on-disk fixture file exists but is empty (zero bytes). The gate
+    // must treat "present but empty" the same as "missing entirely".
     const r = await runGate("case-i-missing", "case-i-missing");
     expect(r.exitCode).toBe(EXIT_USER_SURFACE_UNVERIFIED);
     expect(r.stderr).toMatch(/AC1/);
+    expect(r.stderr).toMatch(/Missing user-surface verification/);
+  });
+
+  it("case i variant — user-surface AC with NO run log file at all also fails (AC3)", async () => {
+    // Distinguishes "file missing" from "file present but empty" — both must
+    // yield the same USER_SURFACE_UNVERIFIED result.
+    const specPath = resolve(FIXTURES, "case-i-missing", "spec.md");
+    const emptyRunsDir = mkdtempSync(resolve(tmpdir(), "ship-runs-"));
+    const r = await execa(
+      "python3",
+      [SHIP_PY, "pre-pr-gate", "case-i-missing", "--spec-path", specPath],
+      { env: { ...process.env, CREW_SHIP_RUNS_DIR: emptyRunsDir }, reject: false },
+    );
+    expect(r.exitCode).toBe(EXIT_USER_SURFACE_UNVERIFIED);
     expect(r.stderr).toMatch(/Missing user-surface verification/);
   });
 
@@ -52,13 +70,30 @@ describe("ship.py pre-pr-gate (Story 1.8 AC4)", () => {
     expect(out.ac_refs).toEqual([1]);
   });
 
-  it("case iii — no user-surface ACs → gate skipped (AC4-iii)", async () => {
+  it("case iii — no user-surface ACs with empty run log → gate skipped (AC4-iii)", async () => {
+    // Fixture run log is present but empty (zero bytes); skipped is the
+    // correct no-op outcome.
     const r = await runGate("case-iii-no-surface", "case-iii-no-surface");
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out.gate).toBe("pre-pr");
     expect(out.status).toBe("skipped");
     expect(out.reason).toMatch(/no user-surface ACs/);
+  });
+
+  it("case iii variant — no user-surface ACs with NO run log file → still skipped (no-op)", async () => {
+    // Distinguishes "file missing" from "file present but empty" — both must
+    // yield the same skipped no-op for specs with no user-surface ACs.
+    const specPath = resolve(FIXTURES, "case-iii-no-surface", "spec.md");
+    const emptyRunsDir = mkdtempSync(resolve(tmpdir(), "ship-runs-"));
+    const r = await execa(
+      "python3",
+      [SHIP_PY, "pre-pr-gate", "case-iii-no-surface", "--spec-path", specPath],
+      { env: { ...process.env, CREW_SHIP_RUNS_DIR: emptyRunsDir }, reject: false },
+    );
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.status).toBe("skipped");
   });
 
   it("case iv-a — event missing data.ac_refs is rejected with MalformedVerificationEvent (AC4-iv-a)", async () => {
