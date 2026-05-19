@@ -223,6 +223,90 @@ describe("static direct-gh-spawn guard (AC5b static)", () => {
   });
 });
 
+describe("static direct-rename guard (Story 1.6 AC6g)", () => {
+  const RENAME_WRAPPER = path.join(SRC_DIR, "state", "manifest-state-machine.ts");
+  const allSources = walkTs(SRC_DIR);
+
+  const BANNED_RENAME_BINDINGS = ["rename", "renameSync"];
+
+  it("no file under mcp-server/src/** (other than state/manifest-state-machine.ts) imports or invokes rename against a state-machine path", () => {
+    const importRegex =
+      /import\s+(?:type\s+)?(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s+from\s+["']([^"']+)["']/g;
+    const offences: string[] = [];
+
+    for (const file of allSources) {
+      if (file === RENAME_WRAPPER) continue;
+      const body = readFileSync(file, "utf8");
+
+      let match: RegExpExecArray | null;
+      importRegex.lastIndex = 0;
+      while ((match = importRegex.exec(body)) !== null) {
+        const namedClause = match[1];
+        const namespaceClause = match[2];
+        const moduleName = match[4]!;
+        if (!FS_MODULE_NAMES.has(moduleName)) continue;
+
+        if (namedClause) {
+          const names = namedClause
+            .split(",")
+            .map((n) => n.trim())
+            .map((n) => {
+              const renamed = n.split(/\s+as\s+/);
+              return (renamed[0] ?? "").trim();
+            })
+            .filter((n) => n.length > 0);
+
+          for (const name of names) {
+            if (BANNED_RENAME_BINDINGS.includes(name)) {
+              offences.push(
+                `${file}: imports banned rename binding '${name}' from '${moduleName}'`,
+              );
+            }
+          }
+        }
+
+        if (namespaceClause) {
+          const aliasMatch = namespaceClause.match(/\*\s+as\s+(\w+)/);
+          const alias = aliasMatch?.[1];
+          if (alias) {
+            for (const banned of BANNED_RENAME_BINDINGS) {
+              const re = new RegExp(`\\b${alias}\\.${banned}\\b`);
+              if (re.test(body)) {
+                offences.push(
+                  `${file}: uses banned API '${alias}.${banned}' via namespace import of '${moduleName}'`,
+                );
+              }
+              const promisesRe = new RegExp(`\\b${alias}\\.promises\\.${banned}\\b`);
+              if (promisesRe.test(body)) {
+                offences.push(
+                  `${file}: uses banned API '${alias}.promises.${banned}' via namespace import of '${moduleName}'`,
+                );
+              }
+            }
+          }
+        }
+      }
+
+      const promisesAliasRegex =
+        /import\s+\{\s*promises\s+as\s+(\w+)\s*\}\s+from\s+["'](?:node:)?fs["']/g;
+      let aliasMatch: RegExpExecArray | null;
+      while ((aliasMatch = promisesAliasRegex.exec(body)) !== null) {
+        const alias = aliasMatch[1]!;
+        for (const banned of BANNED_RENAME_BINDINGS) {
+          const re = new RegExp(`\\b${alias}\\.${banned}\\b`);
+          if (re.test(body)) {
+            offences.push(
+              `${file}: uses banned API '${alias}.${banned}' via 'promises as ${alias}' import`,
+            );
+          }
+        }
+      }
+    }
+
+    expect(offences, offences.join("\n")).toEqual([]);
+  });
+});
+
 describe("static direct-git-spawn guard (Story 1.5 AC6f)", () => {
   const GIT_WRAPPER = path.join(SRC_DIR, "lib", "git.ts");
   const allSources = walkTs(SRC_DIR);

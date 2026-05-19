@@ -337,3 +337,92 @@ export class GitCommitMessageMalformedError extends DomainError {
     this.reason = opts.reason;
   }
 }
+
+/**
+ * `moveBetweenStates` refused a move because the underlying `fs.rename`
+ * returned `EXDEV` — the source and destination resolve to different
+ * filesystems. v1 explicitly does NOT fall back to copy+delete because
+ * that would create an observable in-between state, violating NFR8's
+ * single-syscall atomicity guarantee. (Story 1.6 AC2)
+ */
+export class CrossFilesystemMoveError extends DomainError {
+  readonly absFromPath: string;
+  readonly absToPath: string;
+  readonly ref: string;
+  readonly originalCode: string;
+
+  constructor(opts: {
+    absFromPath: string;
+    absToPath: string;
+    ref: string;
+    originalCode: string;
+  }) {
+    super(
+      `Cross-filesystem move refused for manifest '${opts.ref}': ` +
+        `fs.rename returned ${opts.originalCode}. ` +
+        `from='${opts.absFromPath}', to='${opts.absToPath}'. ` +
+        `v1 explicitly does not support cross-filesystem moves ` +
+        `(NFR8 — single-syscall atomicity). Place the target repo on a ` +
+        `single filesystem, or align the .claude-dev-loop/state/ tree ` +
+        `with the repo root. (Story 1.6 AC2)`,
+    );
+    this.absFromPath = opts.absFromPath;
+    this.absToPath = opts.absToPath;
+    this.ref = opts.ref;
+    this.originalCode = opts.originalCode;
+  }
+}
+
+/**
+ * `moveBetweenStates` was asked to move a manifest from a state
+ * directory where the source file does not exist. Maps the underlying
+ * `ENOENT` errno from `fs.rename` to a typed domain error. (Story 1.6 AC5)
+ */
+export class ManifestNotFoundError extends DomainError {
+  readonly ref: string;
+  readonly expectedAbsPath: string;
+  readonly fromState: string;
+
+  constructor(opts: { ref: string; expectedAbsPath: string; fromState: string }) {
+    super(
+      `Manifest '${opts.ref}' not found at '${opts.expectedAbsPath}' ` +
+        `(expected in state '${opts.fromState}'). A move was requested but ` +
+        `the source file does not exist. This typically means the manifest ` +
+        `was already transitioned by another session, or the ref was never ` +
+        `claimed. (Story 1.6 AC5)`,
+    );
+    this.ref = opts.ref;
+    this.expectedAbsPath = opts.expectedAbsPath;
+    this.fromState = opts.fromState;
+  }
+}
+
+/**
+ * `moveBetweenStates` refused a transition because either the `from`
+ * or `to` state name is not in the canonical whitelist, OR because
+ * the resolved absolute path escapes the canonical state-root tree.
+ * Thrown BEFORE any filesystem operation. (Story 1.6 AC4)
+ */
+export class InvalidStateNameError extends DomainError {
+  readonly attemptedFrom: string;
+  readonly attemptedTo: string;
+  readonly allowedStates: readonly string[];
+  readonly reason: string;
+
+  constructor(opts: {
+    attemptedFrom: string;
+    attemptedTo: string;
+    allowedStates: readonly string[];
+    reason: string;
+  }) {
+    super(
+      `Invalid state-machine transition refused: ${opts.reason}. ` +
+        `from='${opts.attemptedFrom}', to='${opts.attemptedTo}'. ` +
+        `Allowed states: [${opts.allowedStates.join(", ")}]. (Story 1.6 AC4)`,
+    );
+    this.attemptedFrom = opts.attemptedFrom;
+    this.attemptedTo = opts.attemptedTo;
+    this.allowedStates = opts.allowedStates;
+    this.reason = opts.reason;
+  }
+}
