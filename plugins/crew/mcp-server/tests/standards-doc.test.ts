@@ -126,4 +126,11 @@ describe("standards-example.md (shipped copy-target)", () => {
     expect(result.criteria.length).toBeLessThanOrEqual(10);
     expect(result.sourcePath).toBe(EXAMPLE_PATH);
   });
+
+  it("AC4 (README install path): plugins/crew/README.md references standards-example.md as the copy-target", () => {
+    const readmePath = path.resolve(HERE, "..", "..", "README.md");
+    const readme = readFileSync(readmePath, "utf8");
+    expect(readme).toContain("plugins/crew/docs/standards-example.md");
+    expect(readme).toMatch(/docs\/standards\.md/);
+  });
 });
