@@ -1,14 +1,13 @@
 {
-  "name": "sprint-orchestrator-local",
+  "name": "crew",
   "owner": {
     "name": "Jack McIntyre"
   },
   "plugins": [
     {
-      "name": "sprint-orchestrator",
-      "source": "./plugins/sprint-orchestrator",
-      "description": "Autonomous-but-supervised sprint execution with deterministic state and guardrails.",
-      "version": "0.0.1"
+      "name": "crew",
+      "source": "./plugins/crew",
+      "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog."
     }
   ]
 }

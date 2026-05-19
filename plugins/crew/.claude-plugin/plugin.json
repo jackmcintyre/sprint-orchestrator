@@ -8,6 +8,6 @@
       "args": ["./mcp-server/dist/index.js"]
     }
   },
-  "skills": [],
+  "skills": ["skills/status.md"],
   "agents": []
 }

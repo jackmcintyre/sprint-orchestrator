@@ -32,11 +32,25 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
 3. **Load the plugin into Claude Code.**
 
+   Run two commands from the repo root, inside Claude Code:
+
+   3a. Register the repo as a plugin marketplace:
+
    ```text
-   /plugin install plugins/crew
+   /plugin marketplace add .
    ```
 
-   (Run from the repo root, inside Claude Code.)
+   Expected confirmation:
+
+   ```text
+   Marketplace added: crew
+   ```
+
+   3b. Install the `crew` plugin from that marketplace:
+
+   ```text
+   /plugin install crew@crew
+   ```
 
    Expected confirmation:
 
@@ -44,7 +58,7 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
    Plugin installed: crew@0.1.0
    ```
 
-   (Where `<semver>` matches `^\d+\.\d+\.\d+(?:-[\w.]+)?$`.)
+   (The exact version comes from `plugins/crew/.claude-plugin/plugin.json`; `<semver>` matches `^\d+\.\d+\.\d+(?:-[\w.]+)?$`.)
 
 4. **Restart Claude Code.**
 
