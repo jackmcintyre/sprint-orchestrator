@@ -90,3 +90,41 @@ export class AmbiguousAdapterError extends DomainError {
     this.matchingAdapters = opts.matchingAdapters;
   }
 }
+
+/**
+ * The configured adapter's detect() returned false for the target repo.
+ * The config parsed cleanly — it is just no longer (or never was) a match
+ * for this repo. Typical cause: user copied example config into a repo
+ * that doesn't fit. Distinct from InvalidWorkspaceConfigError (schema fail)
+ * and NoAdapterMatchedError (no config + no detect match).
+ */
+export class StaleWorkspaceConfigError extends DomainError {
+  readonly targetRepoRoot: string;
+  readonly configuredAdapter: string;
+  readonly otherMatchingAdapters: string[];
+  readonly schemaModule: string;
+
+  constructor(opts: {
+    targetRepoRoot: string;
+    configuredAdapter: string;
+    otherMatchingAdapters: string[];
+    schemaModule: string;
+  }) {
+    const redirect =
+      opts.otherMatchingAdapters.length > 0
+        ? `Other registered adapters that recognise this repo: ` +
+          `[${opts.otherMatchingAdapters.join(", ")}]. ` +
+          `Update the 'adapter:' key in .claude-dev-loop/config.yaml.`
+        : `No other registered adapter recognises this repo either. ` +
+          `See ${opts.schemaModule} and the canonical example in ` +
+          `plugins/ai-engineering-team/example/.claude-dev-loop/config.yaml.`;
+    super(
+      `Configured adapter '${opts.configuredAdapter}' returned detect()=false ` +
+        `for ${opts.targetRepoRoot}. ${redirect}`,
+    );
+    this.targetRepoRoot = opts.targetRepoRoot;
+    this.configuredAdapter = opts.configuredAdapter;
+    this.otherMatchingAdapters = opts.otherMatchingAdapters;
+    this.schemaModule = opts.schemaModule;
+  }
+}
