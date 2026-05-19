@@ -1,11 +1,13 @@
 import { NotImplementedError } from "../errors.js";
 import type { PlanningAdapter } from "./adapter.js";
+import { BmadAdapter } from "./bmad/index.js";
 
 /**
- * Registered planning adapters. Story 3.1 populates this list and
- * implements selection. Story 1.1 leaves it empty as a seam.
+ * Registered planning adapters, in declaration order. The workspace
+ * resolver (Story 1.2) iterates this list for first-run `detect()`.
+ * Story 3.1 implements `getActiveAdapter()` on top.
  */
-export const adapters: PlanningAdapter[] = [];
+export const adapters: PlanningAdapter[] = [BmadAdapter];
 
 /**
  * Resolve the active planning adapter for the current repo.
