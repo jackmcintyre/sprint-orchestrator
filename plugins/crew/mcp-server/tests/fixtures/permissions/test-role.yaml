@@ -1,0 +1,6 @@
+role: test-role
+tools_allow:
+  - noop
+gh_allow:
+  - pr-view
+gh_allow_args: {}

@@ -171,3 +171,121 @@ export class StandardsDocMalformedError extends DomainError {
     this.copyTarget = opts.copyTarget;
   }
 }
+
+/**
+ * An agent operating under a known role attempted to invoke an MCP tool
+ * whose name is not in the role's tools_allow. Caught at the
+ * CallToolRequestSchema handler before the tool's handler runs.
+ */
+export class PermissionDeniedError extends DomainError {
+  readonly role: string;
+  readonly attemptedTool: string;
+  readonly allowedTools: readonly string[];
+  readonly specPath: string;
+
+  constructor(opts: {
+    role: string;
+    attemptedTool: string;
+    allowedTools: readonly string[];
+    specPath: string;
+  }) {
+    super(
+      `Role '${opts.role}' is not allowed to invoke tool '${opts.attemptedTool}'. ` +
+        `Allowed tools for this role: [${opts.allowedTools.join(", ")}]. ` +
+        `Edit ${opts.specPath} to grant this capability through PR review (NFR13). ` +
+        `(FR79/FR80/NFR12)`,
+    );
+    this.role = opts.role;
+    this.attemptedTool = opts.attemptedTool;
+    this.allowedTools = opts.allowedTools;
+    this.specPath = opts.specPath;
+  }
+}
+
+/**
+ * An agent operating under a known role attempted to invoke a gh
+ * subcommand not in the role's gh_allow. Caught at the gh() wrapper
+ * before any subprocess is spawned.
+ */
+export class GhSubcommandDeniedError extends DomainError {
+  readonly role: string;
+  readonly attemptedSubcommand: string;
+  readonly allowedSubcommands: readonly string[];
+  readonly specPath: string;
+
+  constructor(opts: {
+    role: string;
+    attemptedSubcommand: string;
+    allowedSubcommands: readonly string[];
+    specPath: string;
+  }) {
+    super(
+      `Role '${opts.role}' is not allowed to invoke 'gh ${opts.attemptedSubcommand}'. ` +
+        `Allowed gh subcommands: [${opts.allowedSubcommands.join(", ")}]. ` +
+        `Edit ${opts.specPath} to grant this subcommand. (NFR17)`,
+    );
+    this.role = opts.role;
+    this.attemptedSubcommand = opts.attemptedSubcommand;
+    this.allowedSubcommands = opts.allowedSubcommands;
+    this.specPath = opts.specPath;
+  }
+}
+
+/**
+ * A code path attempted to write to a canonical-state path under the
+ * target repo without an MCP tool context. Routes through
+ * writeManagedFile() are the only permitted entrypoint, and they
+ * require an explicit { toolName, role } context.
+ */
+export class CanonicalFsWriteError extends DomainError {
+  readonly attemptedPath: string;
+  readonly canonicalPathGlob: string;
+
+  constructor(opts: { attemptedPath: string; canonicalPathGlob: string }) {
+    super(
+      `Write to canonical-state path '${opts.attemptedPath}' ` +
+        `(matches '${opts.canonicalPathGlob}') is not permitted outside an MCP tool. ` +
+        `Route this write through an MCP tool that calls writeManagedFile(...). ` +
+        `(FR81/NFR16)`,
+    );
+    this.attemptedPath = opts.attemptedPath;
+    this.canonicalPathGlob = opts.canonicalPathGlob;
+  }
+}
+
+/**
+ * Permission spec file for the named role does not exist at the
+ * expected path. Distinct from RolePermissionsMalformedError (file
+ * exists but fails the schema).
+ */
+export class RolePermissionsMissingError extends DomainError {
+  readonly role: string;
+  readonly specPath: string;
+
+  constructor(opts: { role: string; specPath: string }) {
+    super(
+      `Permission spec for role '${opts.role}' not found at ${opts.specPath}. ` +
+        `See the canonical example in plugins/crew/permissions/generalist-dev.yaml.`,
+    );
+    this.role = opts.role;
+    this.specPath = opts.specPath;
+  }
+}
+
+/**
+ * Permission spec file exists but failed the parser (YAML syntax,
+ * missing required field, or unknown key).
+ */
+export class RolePermissionsMalformedError extends DomainError {
+  readonly specPath: string;
+  readonly zodMessage: string;
+
+  constructor(opts: { specPath: string; zodMessage: string }) {
+    super(
+      `Permission spec at ${opts.specPath} is malformed: ${opts.zodMessage}. ` +
+        `See the canonical example in plugins/crew/permissions/generalist-dev.yaml.`,
+    );
+    this.specPath = opts.specPath;
+    this.zodMessage = opts.zodMessage;
+  }
+}
