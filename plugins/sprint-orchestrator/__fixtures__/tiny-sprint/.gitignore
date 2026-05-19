@@ -1,3 +1,0 @@
-.sprint-orchestrator/state.*
-.sprint-orchestrator/run.log
-.sprint-orchestrator/*.lock

@@ -1,8 +1,0 @@
-{
-  "name": "sprint-orchestrator",
-  "version": "0.0.1",
-  "description": "Autonomous-but-supervised sprint execution with deterministic state and guardrails. Optional BMAD integration.",
-  "author": {
-    "name": "Jack McIntyre"
-  }
-}
