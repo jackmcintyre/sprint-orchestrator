@@ -30,4 +30,6 @@ jobs:
           cache-dependency-path: plugins/crew/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Verify committed dist/ matches fresh build
+        run: git diff --exit-code mcp-server/dist
       - run: pnpm test

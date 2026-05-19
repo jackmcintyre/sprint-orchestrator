@@ -1,4 +1,5 @@
 node_modules/
-**/dist/
 *.tsbuildinfo
 .DS_Store
+# mcp-server build artefacts are committed (Story 1.9) — do NOT re-gitignore.
+# If you add another package with a dist/, ignore it explicitly here.
