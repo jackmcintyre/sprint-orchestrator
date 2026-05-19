@@ -13,6 +13,7 @@ import {
   WorkspaceConfigSchema,
   type PluginSettings,
 } from "../schemas/workspace-config.js";
+import { writeManagedFile } from "../lib/managed-fs.js";
 
 const SCHEMA_MODULE = "mcp-server/src/schemas/workspace-config.ts";
 const CONFIG_REL_PATH = path.join(".claude-dev-loop", "config.yaml");
@@ -88,8 +89,16 @@ export async function resolveWorkspace(opts: ResolveWorkspaceOptions): Promise<W
       adapter_config: matched.defaultConfig(),
       plugin: {},
     });
-    await fs.mkdir(path.dirname(configPath), { recursive: true });
-    await fs.writeFile(configPath, yamlStringify(synthesised), "utf8");
+    // Route through writeManagedFile so the canonical-fs write boundary
+    // is the only entrypoint that touches disk under <targetRepoRoot>.
+    // `.claude-dev-loop/config.yaml` is non-canonical (it's user-authored
+    // config, not agent-managed state), so this call passes through without
+    // an mcpToolContext.
+    await writeManagedFile({
+      absPath: configPath,
+      contents: yamlStringify(synthesised),
+      targetRepoRoot,
+    });
     // Fall through to Branch B — re-read what we just wrote so the
     // same code path validates it, defending against write/read drift.
   }

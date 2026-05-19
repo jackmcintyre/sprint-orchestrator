@@ -1,0 +1,15 @@
+role: generalist-reviewer
+tools_allow:
+  - readSourceStory
+  - lookupStandards
+  - recordVerdict
+  - classifyRiskTier
+  - computeAgreement
+  - recordYield
+  - heartbeat
+gh_allow:
+  - pr-view
+  - pr-comment
+  - pr-checks
+  - api
+gh_allow_args: {}

@@ -1,0 +1,17 @@
+role: generalist-dev
+tools_allow:
+  - claimStory
+  - completeStory
+  - blockStory
+  - readSourceStory
+  - lookupStandards
+  - recordYield
+  - heartbeat
+  - classifyRiskTier
+gh_allow:
+  - pr-create
+  - pr-view
+  - pr-comment
+  - pr-checks
+  - pr-edit
+gh_allow_args: {}
