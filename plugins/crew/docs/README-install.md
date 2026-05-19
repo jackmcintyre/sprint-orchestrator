@@ -110,8 +110,6 @@ Six checkpoints from clone to seeing the plugin recognise your repo. Each step h
 
    (First line matches `^crew v\d+\.\d+\.\d+(?:-[\w.]+)?$`; the `standards:` line starts with `standards: ok`.)
 
-> See Story 7.2 (Epic 7) for the full first-run walkthrough.
-
 ## Build artefacts
 
 `plugins/crew/mcp-server/dist/` is **committed to git by design** (Story 1.9). `/plugin install` copies the working tree as-is and does not run a build step, so the compiled MCP server must already be present in the tree.
@@ -122,3 +120,5 @@ Contract:
 - CI fails any PR where the committed `dist/` drifts from a fresh `pnpm build` (see `.github/workflows/ci.yml` — the `Verify committed dist/ matches fresh build` step runs `git diff --exit-code mcp-server/dist`). The vitest suite `tests/dist-shipping.test.ts` mirrors that check locally and also imports `dist/index.js` and `dist/tools/register.js` as a sentinel against partial builds.
 - Do NOT re-add `dist/` (or `**/dist/`) to any `.gitignore`. If a new workspace package needs its own `dist/` ignored, name it explicitly and leave a comment.
 - Do NOT introduce a `prepare` / `postinstall` build hook to "fix" this. `/plugin install` won't run it. The committed-artefact path is the v1 contract.
+
+> See Story 7.2 (Epic 7) for the full first-run walkthrough.
