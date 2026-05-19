@@ -20,8 +20,8 @@ export const PluginManifestSchema = z
     version: z.string().regex(SEMVER_REGEX, "version must be semver (MAJOR.MINOR.PATCH)"),
     description: z.string(),
     mcpServers: z.record(z.string(), McpServerEntrySchema),
-    skills: z.array(z.string()),
-    agents: z.array(z.string()),
+    skills: z.array(z.string()).optional(),
+    agents: z.array(z.string()).optional(),
   })
   .strict();
 

@@ -5,9 +5,8 @@
   "mcpServers": {
     "crew": {
       "command": "node",
-      "args": ["./mcp-server/dist/index.js"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
-  },
-  "skills": ["skills/status.md"],
-  "agents": []
+  }
 }
