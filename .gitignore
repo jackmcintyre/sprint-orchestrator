@@ -16,3 +16,4 @@ _bmad-output/
 .claude/settings.local.json
 .claude/*.local.json
 .claude/skills/ship-story/.runs/
+.worktrees/

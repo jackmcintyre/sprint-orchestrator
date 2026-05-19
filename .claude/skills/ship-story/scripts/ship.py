@@ -209,8 +209,9 @@ def cmd_resolve(args) -> None:
 
 
 def cmd_worktree(args) -> None:
-    repo_name = REPO.name
-    worktree = REPO.parent / f"{repo_name}-{args.story_key}"
+    worktrees_dir = REPO / ".worktrees"
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    worktree = worktrees_dir / args.story_key
     branch = f"story/{args.story_key}"
 
     if worktree.exists():
