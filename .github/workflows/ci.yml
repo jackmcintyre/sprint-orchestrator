@@ -4,16 +4,16 @@ on:
   push:
     branches: [main]
     paths:
-      - "plugins/ai-engineering-team/**"
+      - "plugins/crew/**"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
-      - "plugins/ai-engineering-team/**"
+      - "plugins/crew/**"
       - ".github/workflows/ci.yml"
 
 defaults:
   run:
-    working-directory: plugins/ai-engineering-team
+    working-directory: plugins/crew
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: plugins/ai-engineering-team/pnpm-lock.yaml
+          cache-dependency-path: plugins/crew/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
