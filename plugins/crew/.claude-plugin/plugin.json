@@ -1,9 +1,9 @@
 {
-  "name": "ai-engineering-team",
+  "name": "crew",
   "version": "0.1.0",
   "description": "AI Engineering Team v1 — a project-shaped team of long-lived AI agents driving a continuous-flow backlog.",
   "mcpServers": {
-    "ai-engineering-team": {
+    "crew": {
       "command": "node",
       "args": ["./mcp-server/dist/index.js"]
     }

@@ -62,7 +62,7 @@ export function createServer(): AiEngineeringTeamServer {
   const registered = new Map<string, ToolDescriptor>();
 
   const server = new Server(
-    { name: "ai-engineering-team", version: getPluginVersion() },
+    { name: "crew", version: getPluginVersion() },
     { capabilities: { tools: {} } },
   ) as AiEngineeringTeamServer;
 

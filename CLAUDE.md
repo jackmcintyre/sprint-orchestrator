@@ -12,7 +12,7 @@ The endgame: **replace the traditional product engineering team with AI tooling*
 
 Success target: a relatively technical non-engineer (like Jack himself, or one external reader of his eventual writeup) installs the plugin on a clean machine, primes a continuous-flow backlog with a planning conversation, walks away, and comes back to a stack of merged PRs they want to keep using — without Jack on the chat.
 
-Authoritative PRD: `_bmad-output/planning-artifacts/prd-ai-engineering-team-v1.md`.
+Authoritative PRD: `_bmad-output/planning-artifacts/prd-crew-v1.md`.
 
 ## How to talk to Jack
 
@@ -25,7 +25,7 @@ Authoritative PRD: `_bmad-output/planning-artifacts/prd-ai-engineering-team-v1.m
 
 ## What this project is
 
-`claude-dev-loop` is the home of **AI Engineering Team v1** — a Claude Code plugin (not yet built; PRD in `_bmad-output/planning-artifacts/prd-ai-engineering-team-v1.md`) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
+`claude-dev-loop` is the home of **AI Engineering Team v1** — a Claude Code plugin (not yet built; PRD in `_bmad-output/planning-artifacts/prd-crew-v1.md`) that lets a non-engineer drive a project-shaped team of long-lived AI agents through a continuous-flow backlog.
 
 The repo previously hosted a `sprint-orchestrator` plugin which was used to dog-food the same broad idea against a sprint construct. That plugin was treated as legacy from day one of the new effort and has been removed (2026-05-19); the new product is being built from scratch.
 

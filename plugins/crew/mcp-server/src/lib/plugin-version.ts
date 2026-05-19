@@ -7,7 +7,7 @@ import { PluginManifestSchema } from "../schemas/plugin-manifest.js";
  * Resolve the plugin root from this module's location.
  *
  * Layout (relative to compiled dist):
- *   plugins/ai-engineering-team/                  <-- PLUGIN_ROOT
+ *   plugins/crew/                  <-- PLUGIN_ROOT
  *     mcp-server/dist/lib/plugin-version.js       <-- this file at runtime
  *     mcp-server/src/lib/plugin-version.ts        <-- this file at test time (vitest)
  *

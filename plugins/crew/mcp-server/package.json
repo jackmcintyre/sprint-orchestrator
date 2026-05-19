@@ -1,5 +1,5 @@
 {
-  "name": "@ai-engineering-team/mcp-server",
+  "name": "@crew/mcp-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -1,5 +1,5 @@
 /**
- * Typed error hierarchy for the ai-engineering-team plugin.
+ * Typed error hierarchy for the crew plugin.
  *
  * All domain errors extend `DomainError`. The MCP boundary
  * (tool handlers in later stories) maps these to MCP errors.
@@ -43,7 +43,7 @@ export class InvalidWorkspaceConfigError extends DomainError {
     super(
       `${opts.configPath} is invalid at '${opts.yamlPath}': ${opts.zodMessage}. ` +
         `See ${opts.schemaModule} and the canonical example in ` +
-        `plugins/ai-engineering-team/example/.claude-dev-loop/config.yaml.`,
+        `plugins/crew/example/.claude-dev-loop/config.yaml.`,
     );
     this.configPath = opts.configPath;
     this.yamlPath = opts.yamlPath;
@@ -65,7 +65,7 @@ export class NoAdapterMatchedError extends DomainError {
       `No registered adapter recognises ${opts.targetRepoRoot}. ` +
         `Registered adapters: [${opts.registeredAdapters.join(", ")}]. ` +
         `Author .claude-dev-loop/config.yaml manually following ` +
-        `plugins/ai-engineering-team/example/.claude-dev-loop/config.yaml.`,
+        `plugins/crew/example/.claude-dev-loop/config.yaml.`,
     );
     this.targetRepoRoot = opts.targetRepoRoot;
     this.registeredAdapters = opts.registeredAdapters;
@@ -117,7 +117,7 @@ export class StaleWorkspaceConfigError extends DomainError {
           `Update the 'adapter:' key in .claude-dev-loop/config.yaml.`
         : `No other registered adapter recognises this repo either. ` +
           `See ${opts.schemaModule} and the canonical example in ` +
-          `plugins/ai-engineering-team/example/.claude-dev-loop/config.yaml.`;
+          `plugins/crew/example/.claude-dev-loop/config.yaml.`;
     super(
       `Configured adapter '${opts.configuredAdapter}' returned detect()=false ` +
         `for ${opts.targetRepoRoot}. ${redirect}`,
